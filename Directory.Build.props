@@ -1,0 +1,56 @@
+<Project>
+  <!-- See https://aka.ms/dotnet/msbuild/customize for more details on customizing your build -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- Analyzers -->
+  <PropertyGroup>
+    <!--
+      AnalysisMode=All enables EVERY built-in .NET analyzer (CAxxxx) rule as a
+      warning, not just the default "recommended" subset.
+      Tune individual rule severities in .editorconfig instead.
+    -->
+    <AnalysisMode>All</AnalysisMode>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <!-- Make IDExxxx code-style rules run during build, not just in the IDE. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <!-- Build hardening -->
+  <PropertyGroup>
+    <!--
+      Fail the build on any warning in CI (analyzer or compiler). Scoped to CI so
+      local dev keeps warnings as warnings and stays friction-free. MSBuild sets
+      ContinuousIntegrationBuild=true on most CI providers (or set it explicitly).
+    -->
+    <TreatWarningsAsErrors Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</TreatWarningsAsErrors>
+    <!-- Reproducible builds: normalize embedded paths and build output. -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(TF_BUILD)' == 'true' or '$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <!--
+      Supply-chain: generate a packages.lock.json next to each project. It pins
+      the exact resolved version + content hash of every dependency, INCLUDING
+      transitive ones. Commit these files. CI restores in locked mode (see the
+      Makefile) so any drift from the committed graph fails the build.
+    -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <!--
+    Third-party analyzers. Versions are pinned centrally in Directory.Packages.props.
+    PrivateAssets=all keeps them out of the published output / downstream consumers.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Analyzer" PrivateAssets="all" />
+    <PackageReference Include="SonarAnalyzer.CSharp" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" PrivateAssets="all" />
+    <PackageReference Include="Roslynator.Analyzers" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

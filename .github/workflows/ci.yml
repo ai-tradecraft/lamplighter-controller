@@ -1,0 +1,58 @@
+# ---------------------------------------------------------------------------
+# GitHub Actions CI — THIN WRAPPER
+# ---------------------------------------------------------------------------
+# This workflow deliberately contains no build logic. It only:
+#   1. checks out the code,
+#   2. installs the pinned prerequisites (Python + pre-commit),
+#   3. runs `make ci`.
+#
+# All actual checks live in the Makefile (`make ci`) and run identically on a
+# developer laptop. To change WHAT runs in CI, edit the Makefile and
+# .pre-commit-config.yaml — not this file. The only things that belong here are
+# platform-specific concerns that cannot live in a portable script: triggers,
+# the runner image, and prerequisite installation.
+#
+# Determinism: tool versions are pinned (Python below; hook versions via `rev`
+# in .pre-commit-config.yaml). Bump them deliberately.
+#
+# Supply chain: third-party actions are pinned to a full commit SHA (with the
+# human-readable tag in a trailing comment), because git tags are mutable and a
+# compromised tag could otherwise inject code into CI. To bump an action,
+# update both the SHA and the comment to the new release's commit.
+name: ci
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [develop]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Python 3.10 is required by the commitizen / sync-pre-commit-deps hooks
+      # (see .pre-commit-config.yaml). Keep this in sync with the README.
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.10"
+
+      # .NET SDK for `make ci`'s build/test steps. The version is pinned in
+      # global.json (global-json-file), so this stays deterministic.
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          global-json-file: global.json
+
+      # Cache pre-commit hook environments keyed on the config so unchanged
+      # hooks are not rebuilt on every run.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - run: pipx install pre-commit
+
+      # The single entrypoint. Everything CI does is defined in the Makefile.
+      - run: make ci

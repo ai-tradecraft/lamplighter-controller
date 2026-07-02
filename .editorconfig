@@ -1,0 +1,96 @@
+# EditorConfig is awesome: https://EditorConfig.org
+# Top-most EditorConfig file
+root = true
+
+# ---------------------------------------------------------------------------
+# All files
+# ---------------------------------------------------------------------------
+[*]
+indent_style = space
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{cs,csx}]
+indent_size = 4
+end_of_line = lf
+
+[*.{csproj,props,targets,json,yml,yaml}]
+indent_size = 2
+
+# ---------------------------------------------------------------------------
+# C# code style & analyzer severities
+# ---------------------------------------------------------------------------
+# This file is where you tune individual rule severities. Directory.Build.props
+# turns ALL analyzers on; here you dial specific rules up or down. Anything not
+# listed inherits the AnalysisMode=All default (warning).
+[*.cs]
+
+#### .NET language conventions ####
+
+# this. preferences — prefer omitting for fields/properties/methods/events
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_qualification_for_event = false:warning
+
+# Use language keywords (int) instead of framework type names (Int32)
+dotnet_style_predefined_type_for_locals_parameters_members = true:warning
+dotnet_style_predefined_type_for_member_access = true:warning
+
+# Modifier preferences
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:warning
+dotnet_style_readonly_field = true:warning
+
+# Expression-level preferences
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_prefer_auto_properties = true:suggestion
+dotnet_style_null_propagation = true:warning
+dotnet_style_coalesce_expression = true:warning
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:warning
+
+#### C# language conventions ####
+
+# var preferences — prefer var when the type is apparent
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+
+# Expression-bodied members
+csharp_style_expression_bodied_methods = when_on_single_line:suggestion
+csharp_style_expression_bodied_properties = true:suggestion
+csharp_style_expression_bodied_accessors = true:suggestion
+
+# Pattern matching
+csharp_style_pattern_matching_over_is_with_cast_check = true:warning
+csharp_style_pattern_matching_over_as_with_null_check = true:warning
+csharp_style_prefer_pattern_matching = true:suggestion
+
+# Null-checking & modern syntax
+csharp_style_throw_expression = true:suggestion
+csharp_style_prefer_null_check_over_type_check = true:warning
+csharp_prefer_braces = true:warning
+csharp_style_namespace_declarations = file_scoped:warning
+
+# using directive placement
+csharp_using_directive_placement = outside_namespace:warning
+
+#### Naming: async methods end with Async (example rule) ####
+dotnet_naming_rule.async_methods_end_in_async.severity = warning
+dotnet_naming_rule.async_methods_end_in_async.symbols = async_methods
+dotnet_naming_rule.async_methods_end_in_async.style = end_in_async
+
+dotnet_naming_symbols.async_methods.applicable_kinds = method
+dotnet_naming_symbols.async_methods.required_modifiers = async
+
+dotnet_naming_style.end_in_async.required_suffix = Async
+dotnet_naming_style.end_in_async.capitalization = pascal_case
+
+#### Pragmatic severity overrides ####
+# CA1014: Mark assemblies with CLSCompliant — rarely relevant for modern apps.
+dotnet_diagnostic.CA1014.severity = none
+# CA1062: public methods validate args — noisy in internal app code; keep for libraries.
+dotnet_diagnostic.CA1062.severity = suggestion
+# MA0048: File name must match type name — relax for nested/partial helper types.
+dotnet_diagnostic.MA0048.severity = suggestion

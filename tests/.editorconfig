@@ -1,0 +1,8 @@
+# Test-project-specific analyzer overrides.
+#
+# Test method names conventionally use underscores (e.g.
+# Method_Scenario_ExpectedResult) for readability, which clashes with
+# CA1707 ("remove underscores from member name"). Disabling it here keeps the
+# convention available in tests without relaxing the rule for production code.
+[*.cs]
+dotnet_diagnostic.CA1707.severity = none

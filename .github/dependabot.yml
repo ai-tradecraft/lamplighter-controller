@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# Dependabot — automated dependency-update PRs
+# ---------------------------------------------------------------------------
+# Two ecosystems are watched:
+#
+#   github-actions  Keeps the SHA-pinned actions in .github/workflows/*.yml
+#                   current. The workflow pins each action to a full commit SHA
+#                   (tags are mutable) — without this, those pins silently go
+#                   stale and miss upstream security patches. Dependabot bumps
+#                   the SHA and the trailing version comment together.
+#
+#   nuget           Opens PRs for NuGet updates. Because the repo uses lock files
+#                   (RestorePackagesWithLockFile in Directory.Build.props),
+#                   Dependabot also regenerates the affected packages.lock.json,
+#                   so the PR stays green under the `--locked-mode` CI gate.
+#
+# Adjust the schedule, open-PR limits, and reviewers/labels to suit your project.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    open-pull-requests-limit: 10

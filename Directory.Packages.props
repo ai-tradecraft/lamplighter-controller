@@ -1,0 +1,21 @@
+<Project>
+  <PropertyGroup>
+    <!-- Enable central package management, https://learn.microsoft.com/en-us/nuget/consume-packages/Central-Package-Management -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <!-- Test package versions (referenced from test projects under tests/). -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageVersion Include="coverlet.collector" Version="10.0.1" />
+  </ItemGroup>
+  <!-- Analyzer package versions (referenced from Directory.Build.props). -->
+  <ItemGroup>
+    <PackageVersion Include="Meziantou.Analyzer" Version="3.0.117" />
+    <PackageVersion Include="SonarAnalyzer.CSharp" Version="10.27.0.140913" />
+    <PackageVersion Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" />
+    <PackageVersion Include="Roslynator.Analyzers" Version="4.15.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" />
+  </ItemGroup>
+</Project>
