@@ -13,7 +13,7 @@ public sealed class CliRunnerCommandHandlerTests
         // Arrange
         var contentRef = Content("agent_1", "application/json", 2);
         var api = new FakeRunnerApiClient("""{"agent_id":"agent_1"}""");
-        var process = new FakeHarnessProcessRunner(
+        var process = new FakeAdapterProcessRunner(
             new ProcessOutput("prepare-agent", 0, """{"status":"allocated"}""", ""),
             new ProcessOutput("start-agent", 0, """{"status":"ready"}""", ""));
         var controllerWorkspace = NewRuntimeRoot();
@@ -54,7 +54,7 @@ public sealed class CliRunnerCommandHandlerTests
         var contentRef = Content("spec_1", "application/json", 2);
         var api = new FakeRunnerApiClient(
             """{"agent_session_id":"session_1","workspace_ref":"/tmp/workspace"}""");
-        var process = new FakeHarnessProcessRunner(
+        var process = new FakeAdapterProcessRunner(
             new ProcessOutput(
                 "uv run lamplighter-opencode create-session",
                 0,
@@ -85,7 +85,7 @@ public sealed class CliRunnerCommandHandlerTests
         // Arrange
         var api = new FakeRunnerApiClient(
             """{"id":"turn_1","agent_session_id":"session_1","instruction":"hello"}""");
-        var process = new FakeHarnessProcessRunner(
+        var process = new FakeAdapterProcessRunner(
             new ProcessOutput(
                 "uv run lamplighter-opencode submit-turn",
                 2,
@@ -129,7 +129,7 @@ public sealed class CliRunnerCommandHandlerTests
             }
             """;
         var api = new FakeRunnerApiClient("");
-        var process = new FakeHarnessProcessRunner(
+        var process = new FakeAdapterProcessRunner(
             new ProcessOutput("get-session-history", 0, history, ""));
         var controllerWorkspace = NewRuntimeRoot();
         var handler = CreateHandler(api, process, controllerWorkspace);
@@ -162,7 +162,7 @@ public sealed class CliRunnerCommandHandlerTests
         // Arrange
         var api = new FakeRunnerApiClient(
             """{"id":"turn_1","agent_session_id":"session_1","instruction":"hello"}""");
-        var process = new FakeHarnessProcessRunner(new ProcessOutput(
+        var process = new FakeAdapterProcessRunner(new ProcessOutput(
             "uv run lamplighter-opencode submit-turn",
             0,
             """
@@ -199,7 +199,7 @@ public sealed class CliRunnerCommandHandlerTests
     }
 
     [Fact]
-    public void ConfigureHarnessProcessEnvironment_RemovesProviderOwnedOpenCodeSettings()
+    public void ConfigureAdapterProcessEnvironment_RemovesProviderOwnedSettings()
     {
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
@@ -219,7 +219,7 @@ public sealed class CliRunnerCommandHandlerTests
             ["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
         };
 
-        HarnessProcessRunner.ConfigureHarnessProcessEnvironment(environment);
+        CliAdapterProcessRunner.ConfigureAdapterProcessEnvironment(environment);
 
         Assert.Equal("1", environment["LAMPLIGHTER_OPENCODE_USE_REAL_BACKEND"]);
         Assert.Equal("1", environment["OPENCODE_DISABLE_AUTOUPDATE"]);
@@ -233,17 +233,20 @@ public sealed class CliRunnerCommandHandlerTests
 
     private static CliRunnerCommandHandler CreateHandler(
         IRunnerApiClient api,
-        IHarnessProcessRunner process,
+        IAdapterProcessRunner process,
         string controllerWorkspace)
     {
+        var options = Options.Create(new RunnerOptions
+        {
+            RunnerId = "controller_1",
+            ControllerWorkspace = controllerWorkspace,
+            Adapter = OpenCodeCliAdapterOptions()
+        });
+        var adapter = new CliAgentRuntimeAdapter(process, options);
         return new CliRunnerCommandHandler(
             api,
-            process,
-            Options.Create(new RunnerOptions
-            {
-                RunnerId = "controller_1",
-                ControllerWorkspace = controllerWorkspace
-            }),
+            adapter,
+            options,
             NullLogger<CliRunnerCommandHandler>.Instance);
     }
 
@@ -306,8 +309,28 @@ public sealed class CliRunnerCommandHandlerTests
         return Path.Combine(Path.GetTempPath(), $"runner_handler_{Guid.NewGuid():N}");
     }
 
-    private sealed class FakeHarnessProcessRunner(params ProcessOutput[] outputs)
-        : IHarnessProcessRunner
+    private static RuntimeAdapterOptions OpenCodeCliAdapterOptions()
+    {
+        return new RuntimeAdapterOptions
+        {
+            Kind = "opencode-cli",
+            Executable = "uv",
+            ArgumentPrefix = ["run", "lamplighter-opencode"],
+            Commands = new RuntimeAdapterCommandOptions
+            {
+                PrepareRuntime = "prepare-agent",
+                StartRuntime = "start-agent",
+                StopRuntime = "stop-agent",
+                CreateSession = "create-session",
+                StartInvocation = "submit-turn",
+                CloseSession = "cancel-session",
+                SynchronizeSessionHistory = "get-session-history"
+            }
+        };
+    }
+
+    private sealed class FakeAdapterProcessRunner(params ProcessOutput[] outputs)
+        : IAdapterProcessRunner
     {
         private readonly Queue<ProcessOutput> _outputs = new(outputs);
 

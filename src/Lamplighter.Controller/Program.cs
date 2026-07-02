@@ -19,7 +19,8 @@ builder.Services.AddHttpClient<RunnerApiClient>((sp, client) =>
 });
 builder.Services.AddTransient<IRunnerApiClient>(sp => sp.GetRequiredService<RunnerApiClient>());
 builder.Services.AddHttpClient<IOpenCodeHealthProbe, OpenCodeHealthProbe>();
-builder.Services.AddSingleton<IHarnessProcessRunner, HarnessProcessRunner>();
+builder.Services.AddSingleton<IAdapterProcessRunner, CliAdapterProcessRunner>();
+builder.Services.AddSingleton<IAgentRuntimeAdapter, CliAgentRuntimeAdapter>();
 builder.Services.AddSingleton<IRunnerCommandHandler, CliRunnerCommandHandler>();
 builder.Services.AddSingleton<RunnerCommandLoop>();
 builder.Services.AddHostedService<RunnerWorker>();

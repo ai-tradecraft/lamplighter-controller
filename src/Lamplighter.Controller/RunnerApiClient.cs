@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 
 namespace Lamplighter.Controller;
 
-public interface IRunnerApiClient
+internal interface IRunnerApiClient
 {
     Task UpsertHeartbeatAsync(ControllerHeartbeat heartbeat, CancellationToken cancellationToken);
 
@@ -42,7 +42,7 @@ public interface IRunnerApiClient
     Task PublishEventAsync(ControllerEvent controllerEvent, CancellationToken cancellationToken);
 }
 
-public sealed class RunnerApiClient(HttpClient httpClient, IOptions<RunnerOptions> options) : IRunnerApiClient
+internal sealed class RunnerApiClient(HttpClient httpClient, IOptions<RunnerOptions> options) : IRunnerApiClient
 {
     private readonly RunnerOptions _options = options.Value;
 

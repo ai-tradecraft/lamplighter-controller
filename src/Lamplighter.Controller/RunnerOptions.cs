@@ -1,6 +1,6 @@
 namespace Lamplighter.Controller;
 
-public sealed record RunnerOptions
+internal sealed record RunnerOptions
 {
     public string RunnerId { get; init; } = $"runner_{Environment.MachineName.ToLowerInvariant()}";
     public Uri OrchestratorBaseUri { get; init; } = new("http://127.0.0.1:5087");
@@ -10,5 +10,25 @@ public sealed record RunnerOptions
     public int LeaseSeconds { get; init; } = 60;
     public TimeSpan RetryBackoff { get; init; } = TimeSpan.FromSeconds(5);
     public string ControllerWorkspace { get; set; } = "";
-    public string? HarnessRepoRoot { get; init; }
+    public RuntimeAdapterOptions Adapter { get; init; } = new();
+}
+
+internal sealed record RuntimeAdapterOptions
+{
+    public string Kind { get; init; } = "cli";
+    public string Executable { get; init; } = "";
+    public string[] ArgumentPrefix { get; init; } = [];
+    public string? WorkingDirectory { get; init; }
+    public RuntimeAdapterCommandOptions Commands { get; init; } = new();
+}
+
+internal sealed record RuntimeAdapterCommandOptions
+{
+    public string PrepareRuntime { get; init; } = "prepare-runtime";
+    public string StartRuntime { get; init; } = "start-runtime";
+    public string StopRuntime { get; init; } = "stop-runtime";
+    public string CreateSession { get; init; } = "create-session";
+    public string StartInvocation { get; init; } = "start-invocation";
+    public string CloseSession { get; init; } = "close-session";
+    public string SynchronizeSessionHistory { get; init; } = "synchronize-session-history";
 }

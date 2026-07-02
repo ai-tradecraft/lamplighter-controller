@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace Lamplighter.Controller;
 
-public sealed record RunnerAgentInventoryItem(
+internal sealed record RunnerAgentInventoryItem(
     string AgentSessionId,
     string Status,
     string RuntimePath,
@@ -16,14 +16,14 @@ public sealed record RunnerAgentInventoryItem(
     string? AgentId = null,
     IReadOnlyList<RunnerAgentSessionInventoryItem>? Sessions = null);
 
-public sealed record RunnerAgentSessionInventoryItem(
+internal sealed record RunnerAgentSessionInventoryItem(
     string SessionId,
     string Status,
     string RuntimePath,
     string? OpenCodeSessionId,
     DateTimeOffset ObservedAt);
 
-public static class RunnerAgentInventory
+internal static class RunnerAgentInventory
 {
     private static readonly HashSet<string> TerminalStatuses =
         new(StringComparer.OrdinalIgnoreCase) { "cancelled", "failed" };
@@ -269,7 +269,7 @@ public static class RunnerAgentInventory
     }
 }
 
-public interface IOpenCodeHealthProbe
+internal interface IOpenCodeHealthProbe
 {
     Task<string> GetStatusAsync(
         string endpoint,
@@ -279,7 +279,7 @@ public interface IOpenCodeHealthProbe
         CancellationToken cancellationToken);
 }
 
-public sealed class OpenCodeHealthProbe(HttpClient httpClient) : IOpenCodeHealthProbe
+internal sealed class OpenCodeHealthProbe(HttpClient httpClient) : IOpenCodeHealthProbe
 {
     public async Task<string> GetStatusAsync(
         string endpoint,

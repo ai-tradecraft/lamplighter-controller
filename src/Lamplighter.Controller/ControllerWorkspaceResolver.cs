@@ -1,13 +1,13 @@
 namespace Lamplighter.Controller;
 
-public enum ControllerWorkspacePlatform
+internal enum ControllerWorkspacePlatform
 {
     MacOS,
     Linux,
     Windows
 }
 
-public static class ControllerWorkspaceResolver
+internal static class ControllerWorkspaceResolver
 {
     public const string EnvironmentVariable = "LAMPLIGHTER_CONTROLLER_WORKSPACE";
 

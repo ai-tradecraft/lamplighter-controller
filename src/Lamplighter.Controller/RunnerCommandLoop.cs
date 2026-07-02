@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace Lamplighter.Controller;
 
-public sealed class RunnerCommandLoop(
+internal sealed class RunnerCommandLoop(
     IRunnerApiClient apiClient,
     IRunnerCommandHandler commandHandler,
     IOptions<RunnerOptions> options,

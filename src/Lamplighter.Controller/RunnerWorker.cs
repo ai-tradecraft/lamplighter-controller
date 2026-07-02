@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace Lamplighter.Controller;
 
-public sealed class RunnerWorker(
+internal sealed class RunnerWorker(
     IOptions<RunnerOptions> options,
     IRunnerApiClient apiClient,
     IOpenCodeHealthProbe healthProbe,

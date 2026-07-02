@@ -12,6 +12,10 @@ CLI from this controller.
 
 - Northbound orchestrator/controller contracts live in
   `../tradecraft-contracts/src/Tradecraft.Contracts`.
+- Southbound controller/adapter protocol schemas live in
+  `../tradecraft-contracts/contracts/agent-runtime/v1/schemas/runtime-adapter-message.schema.json`.
+  The controller's C# `IAgentRuntimeAdapter` is an internal port that maps
+  controller commands onto that provider-neutral operation model.
 - OpenCode adapter payload schemas live in
   `../tradecraft-contracts/contracts/lamplighter-opencode/schemas`.
 - The controller does not own provider/model configuration. It passes work to
@@ -24,7 +28,7 @@ From the meta-repository `submodules` directory:
 
 ```sh
 cd lamplighter-controller
-Runner__HarnessRepoRoot=../lamplighter-opencode \
+Runner__Adapter__WorkingDirectory=../lamplighter-opencode \
 TRADECRAFT_CONTRACTS_ROOT=../tradecraft-contracts \
 dotnet run --project src/Lamplighter.Controller
 ```
