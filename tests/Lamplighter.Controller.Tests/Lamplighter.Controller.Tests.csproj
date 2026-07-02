@@ -1,9 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Test projects are not shipped and have no public API to document, so
-         opt out of the solution-wide GenerateDocumentationFile/IsPackable
-         defaults inherited from Directory.Build.props. -->
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IsTestProject>true</IsTestProject>
@@ -23,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/library/library.csproj" />
+    <ProjectReference Include="../../src/Lamplighter.Controller/Lamplighter.Controller.csproj" />
   </ItemGroup>
 
 </Project>

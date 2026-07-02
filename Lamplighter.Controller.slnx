@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Lamplighter.Controller/Lamplighter.Controller.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Lamplighter.Controller.Tests/Lamplighter.Controller.Tests.csproj" />
+  </Folder>
+</Solution>
