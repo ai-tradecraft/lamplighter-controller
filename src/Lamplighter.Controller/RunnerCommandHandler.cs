@@ -69,10 +69,7 @@ internal sealed class CliRunnerCommandHandler(
         CancellationToken cancellationToken)
     {
         var output = await runtimeAdapter.StartRuntimeAsync(
-            new AgentRuntimeAdapterRequest(
-                CommandId: command.CommandId,
-                RuntimeId: RequiredAgentId(command),
-                Payload: await DownloadPayloadAsync(command, cancellationToken)),
+            await CreateAdapterRequestAsync(command, cancellationToken),
             cancellationToken);
         return await CompleteFromAdapterAsync(
             command,
@@ -87,11 +84,7 @@ internal sealed class CliRunnerCommandHandler(
         CancellationToken cancellationToken)
     {
         var output = await runtimeAdapter.CreateSessionAsync(
-            new AgentRuntimeAdapterRequest(
-                CommandId: command.CommandId,
-                RuntimeId: RequiredAgentId(command),
-                SessionId: RequiredAgentSessionId(command),
-                Payload: await DownloadPayloadAsync(command, cancellationToken)),
+            await CreateAdapterRequestAsync(command, cancellationToken),
             cancellationToken);
         return await CompleteFromAdapterAsync(
             command,
@@ -106,9 +99,7 @@ internal sealed class CliRunnerCommandHandler(
         CancellationToken cancellationToken)
     {
         var output = await runtimeAdapter.StopRuntimeAsync(
-            new AgentRuntimeAdapterRequest(
-                CommandId: command.CommandId,
-                RuntimeId: RequiredAgentId(command)),
+            await CreateAdapterRequestAsync(command, cancellationToken),
             cancellationToken);
         return await CompleteFromAdapterAsync(
             command,
@@ -123,14 +114,8 @@ internal sealed class CliRunnerCommandHandler(
         CancellationToken cancellationToken)
     {
         var payload = await DownloadPayloadAsync(command, cancellationToken);
-        var sessionId = RequiredAgentSessionId(command);
         var output = await runtimeAdapter.StartInvocationAsync(
-            new AgentRuntimeAdapterRequest(
-                CommandId: command.CommandId,
-                RuntimeId: command.Target.RuntimeId,
-                SessionId: sessionId,
-                InvocationId: InvocationId(command),
-                Payload: payload),
+            CreateAdapterRequest(command, payload),
             cancellationToken);
 
         return await CompleteTurnFromAdapterAsync(command, output, cancellationToken);
@@ -149,10 +134,7 @@ internal sealed class CliRunnerCommandHandler(
         if (runtimeId is not null)
         {
             var output = await runtimeAdapter.CloseSessionAsync(
-                new AgentRuntimeAdapterRequest(
-                    CommandId: command.CommandId,
-                    RuntimeId: runtimeId,
-                    SessionId: sessionId),
+                await CreateAdapterRequestAsync(command, cancellationToken),
                 cancellationToken);
             return await CompleteFromAdapterAsync(
                 command,
@@ -179,12 +161,8 @@ internal sealed class CliRunnerCommandHandler(
         ControllerCommand command,
         CancellationToken cancellationToken)
     {
-        var sessionId = RequiredAgentSessionId(command);
         var output = await runtimeAdapter.SynchronizeSessionHistoryAsync(
-            new AgentRuntimeAdapterRequest(
-                CommandId: command.CommandId,
-                RuntimeId: RequiredAgentId(command),
-                SessionId: sessionId),
+            await CreateAdapterRequestAsync(command, cancellationToken),
             cancellationToken);
         return await CompleteFromAdapterAsync(
             command,
@@ -311,6 +289,32 @@ internal sealed class CliRunnerCommandHandler(
         return await apiClient.DownloadContentStringAsync(command.PayloadRef, cancellationToken);
     }
 
+    private async Task<AgentRuntimeAdapterRequest> CreateAdapterRequestAsync(
+        ControllerCommand command,
+        CancellationToken cancellationToken)
+    {
+        var payload = command.PayloadRef is null
+            ? null
+            : await DownloadPayloadAsync(command, cancellationToken);
+        return CreateAdapterRequest(command, payload);
+    }
+
+    private static AgentRuntimeAdapterRequest CreateAdapterRequest(
+        ControllerCommand command,
+        string? payload)
+    {
+        return new AgentRuntimeAdapterRequest(
+            CommandId: command.CommandId,
+            Target: command.Target,
+            IdempotencyKey: command.IdempotencyKey,
+            Deadline: command.Execution.Deadline,
+            FencingToken: command.Execution.Lease?.FencingToken ?? 1,
+            Correlation: command.Correlation,
+            AuthorizationContext: command.AuthorizationContext,
+            Payload: payload,
+            PayloadContentType: command.PayloadRef?.ContentType);
+    }
+
     private async Task PublishEventAsync(
         ControllerCommand command,
         string eventType,
@@ -348,28 +352,11 @@ internal sealed class CliRunnerCommandHandler(
             cancellationToken);
     }
 
-    private static string RequiredAgentId(ControllerCommand command)
-    {
-        return SafeIdentifier(
-            command.Target.RuntimeId
-            ?? throw new InvalidOperationException(
-                $"Command {command.CommandId} does not target a runtime."),
-            "agent_");
-    }
-
     private static string RequiredAgentSessionId(ControllerCommand command)
     {
         return command.Target.AgentSessionId
                ?? throw new InvalidOperationException(
                    $"Command {command.CommandId} does not target an agent session.");
-    }
-
-    private static string InvocationId(ControllerCommand command)
-    {
-        return command.Target.InvocationId
-               ?? command.Correlation.InvocationId
-               ?? command.Correlation.CorrelationId
-               ?? command.CommandId;
     }
 
     private static AggregateReference Aggregate(ControllerCommand command)
@@ -390,15 +377,5 @@ internal sealed class CliRunnerCommandHandler(
         }
 
         return new AggregateReference("controller", command.Target.ControllerId ?? "controller_unknown");
-    }
-
-    private static string SafeIdentifier(string value, string prefix)
-    {
-        if (!value.StartsWith(prefix, StringComparison.Ordinal)
-            || value.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-'))
-        {
-            throw new InvalidOperationException($"Unsafe identifier: {value}");
-        }
-        return value;
     }
 }

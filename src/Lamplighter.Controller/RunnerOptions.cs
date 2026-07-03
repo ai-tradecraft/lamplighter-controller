@@ -24,11 +24,5 @@ internal sealed record RuntimeAdapterOptions
 
 internal sealed record RuntimeAdapterCommandOptions
 {
-    public string PrepareRuntime { get; init; } = "prepare-runtime";
-    public string StartRuntime { get; init; } = "start-runtime";
-    public string StopRuntime { get; init; } = "stop-runtime";
-    public string CreateSession { get; init; } = "create-session";
-    public string StartInvocation { get; init; } = "start-invocation";
-    public string CloseSession { get; init; } = "close-session";
-    public string SynchronizeSessionHistory { get; init; } = "synchronize-session-history";
+    public string Operation { get; init; } = "adapter-operation";
 }

@@ -6,7 +6,7 @@ edge of a deployment.
 The controller speaks the stable northbound protocol to the Tradecraft
 orchestrator and delegates provider/deployment-specific model access to runtime
 adapters. The current POC adapter is `lamplighter-opencode`, invoked as a local
-CLI from this controller.
+CLI from this controller through a single `adapter-operation` envelope command.
 
 ## Boundaries
 
@@ -16,6 +16,9 @@ CLI from this controller.
   `../tradecraft-contracts/contracts/agent-runtime/v1/schemas/runtime-adapter-message.schema.json`.
   The controller's C# `IAgentRuntimeAdapter` is an internal port that maps
   controller commands onto that provider-neutral operation model.
+- The configured CLI adapter sends `adapter.operation` envelopes and expects
+  `adapter.operation_result` envelopes back. Provider-specific commands such
+  as OpenCode session creation remain inside the adapter package.
 - OpenCode adapter payload schemas live in
   `../tradecraft-contracts/contracts/lamplighter-opencode/schemas`.
 - The controller does not own provider/model configuration. It passes work to

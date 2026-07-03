@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Tradecraft.Contracts.AgentRuntime.V1;
@@ -14,8 +15,11 @@ public sealed class CliRunnerCommandHandlerTests
         var contentRef = Content("agent_1", "application/json", 2);
         var api = new FakeRunnerApiClient("""{"agent_id":"agent_1"}""");
         var process = new FakeAdapterProcessRunner(
-            new ProcessOutput("prepare-agent", 0, """{"status":"allocated"}""", ""),
-            new ProcessOutput("start-agent", 0, """{"status":"ready"}""", ""));
+            new ProcessOutput(
+                "uv run lamplighter-opencode adapter-operation",
+                0,
+                AdapterResult("""{"status":"ready"}""", "application/vnd.tradecraft.start-agent-result+json"),
+                ""));
         var controllerWorkspace = NewRuntimeRoot();
         var handler = CreateHandler(api, process, controllerWorkspace);
         var command = Command(
@@ -28,19 +32,17 @@ public sealed class CliRunnerCommandHandlerTests
 
         // Assert
         Assert.Equal(CommandDeliveryStatuses.Completed, result.DeliveryStatus);
-        Assert.Collection(
-            process.Invocations,
-            invocation =>
-            {
-                Assert.Contains("prepare-agent", invocation.Arguments);
-                Assert.Contains(controllerWorkspace, invocation.Arguments);
-            },
-            invocation =>
-            {
-                Assert.Contains("start-agent", invocation.Arguments);
-                Assert.Contains("agent_1", invocation.Arguments);
-                Assert.Contains(controllerWorkspace, invocation.Arguments);
-            });
+        var operation = ReadOperation(process);
+        Assert.Equal("adapter.operation", operation.RootElement.GetProperty("message_type").GetString());
+        Assert.Equal("StartRuntime", operation.RootElement.GetProperty("operation_type").GetString());
+        Assert.Equal("agent_1", operation.RootElement.GetProperty("target").GetProperty("runtime_id").GetString());
+        Assert.Equal(
+            controllerWorkspace,
+            operation.RootElement.GetProperty("extensions").GetProperty("tradecraft.dev/controller_workspace").GetString());
+        Assert.Contains("adapter-operation", process.Arguments);
+        Assert.Contains("--operation", process.Arguments);
+        Assert.DoesNotContain("prepare-agent", process.Arguments);
+        Assert.DoesNotContain("start-agent", process.Arguments);
         var published = Assert.Single(api.PublishedEvents);
         Assert.Equal(ControllerEventTypes.AgentRuntimeReady, published.EventType);
         Assert.Equal("agent_1", published.Target.RuntimeId);
@@ -56,9 +58,9 @@ public sealed class CliRunnerCommandHandlerTests
             """{"agent_session_id":"session_1","workspace_ref":"/tmp/workspace"}""");
         var process = new FakeAdapterProcessRunner(
             new ProcessOutput(
-                "uv run lamplighter-opencode create-session",
+                "uv run lamplighter-opencode adapter-operation",
                 0,
-                """{"status":"ready"}""",
+                AdapterResult("""{"status":"ready"}""", "application/vnd.tradecraft.create-session-result+json"),
                 ""));
         var handler = CreateHandler(api, process, NewRuntimeRoot());
         var command = Command(
@@ -72,7 +74,9 @@ public sealed class CliRunnerCommandHandlerTests
 
         // Assert
         Assert.Equal(CommandDeliveryStatuses.Completed, result.DeliveryStatus);
-        Assert.Contains("create-session", process.Arguments);
+        Assert.Equal("CreateSession", ReadOperation(process).RootElement.GetProperty("operation_type").GetString());
+        Assert.Contains("adapter-operation", process.Arguments);
+        Assert.DoesNotContain("create-session", process.Arguments);
         var published = Assert.Single(api.PublishedEvents);
         Assert.Equal(ControllerEventTypes.AgentSessionCreated, published.EventType);
         Assert.Equal("session_1", published.Target.AgentSessionId);
@@ -87,10 +91,10 @@ public sealed class CliRunnerCommandHandlerTests
             """{"id":"turn_1","agent_session_id":"session_1","instruction":"hello"}""");
         var process = new FakeAdapterProcessRunner(
             new ProcessOutput(
-                "uv run lamplighter-opencode submit-turn",
-                2,
-                "",
-                "boom"));
+                "uv run lamplighter-opencode adapter-operation",
+                0,
+                FailedAdapterResult("OpenCode server request failed."),
+                ""));
         var handler = CreateHandler(api, process, NewRuntimeRoot());
         var command = Command(
             ControllerCommandTypes.StartInvocation,
@@ -107,7 +111,9 @@ public sealed class CliRunnerCommandHandlerTests
         Assert.Equal(
             ProtocolErrorClassifications.AdapterFailure,
             Assert.IsType<ProtocolError>(result.Error).Classification);
-        Assert.Contains("submit-turn", process.Arguments);
+        Assert.Equal("StartInvocation", ReadOperation(process).RootElement.GetProperty("operation_type").GetString());
+        Assert.Contains("adapter-operation", process.Arguments);
+        Assert.DoesNotContain("submit-turn", process.Arguments);
         var published = Assert.Single(api.PublishedEvents);
         Assert.Equal(ControllerEventTypes.OutcomeReported, published.EventType);
         Assert.Equal("invocation", published.Aggregate.Type);
@@ -130,7 +136,11 @@ public sealed class CliRunnerCommandHandlerTests
             """;
         var api = new FakeRunnerApiClient("");
         var process = new FakeAdapterProcessRunner(
-            new ProcessOutput("get-session-history", 0, history, ""));
+            new ProcessOutput(
+                "uv run lamplighter-opencode adapter-operation",
+                0,
+                AdapterResult(history, "application/vnd.tradecraft.agent-chat-history+json"),
+                ""));
         var controllerWorkspace = NewRuntimeRoot();
         var handler = CreateHandler(api, process, controllerWorkspace);
         var command = Command(
@@ -144,10 +154,13 @@ public sealed class CliRunnerCommandHandlerTests
 
         // Assert
         Assert.Equal(CommandDeliveryStatuses.Completed, result.DeliveryStatus);
-        Assert.Contains("get-session-history", process.Arguments);
-        Assert.Contains("agent_1", process.Arguments);
-        Assert.Contains("session_1", process.Arguments);
-        Assert.Contains(controllerWorkspace, process.Arguments);
+        var operation = ReadOperation(process);
+        Assert.Equal("ReadTranscript", operation.RootElement.GetProperty("operation_type").GetString());
+        Assert.Equal("agent_1", operation.RootElement.GetProperty("target").GetProperty("runtime_id").GetString());
+        Assert.Equal("session_1", operation.RootElement.GetProperty("target").GetProperty("agent_session_id").GetString());
+        Assert.Equal(
+            controllerWorkspace,
+            operation.RootElement.GetProperty("extensions").GetProperty("tradecraft.dev/controller_workspace").GetString());
         Assert.Equal(
             "application/vnd.tradecraft.agent-chat-history+json",
             api.Uploads.Single().ContentType);
@@ -163,8 +176,9 @@ public sealed class CliRunnerCommandHandlerTests
         var api = new FakeRunnerApiClient(
             """{"id":"turn_1","agent_session_id":"session_1","instruction":"hello"}""");
         var process = new FakeAdapterProcessRunner(new ProcessOutput(
-            "uv run lamplighter-opencode submit-turn",
+            "uv run lamplighter-opencode adapter-operation",
             0,
+            AdapterResult(
             """
             {
               "status": "failed",
@@ -175,6 +189,7 @@ public sealed class CliRunnerCommandHandlerTests
               }
             }
             """,
+                "application/vnd.tradecraft.agent-turn-result+json"),
             ""));
         var handler = CreateHandler(api, process, NewRuntimeRoot());
         var command = Command(
@@ -304,6 +319,64 @@ public sealed class CliRunnerCommandHandlerTests
             length);
     }
 
+    private static JsonDocument ReadOperation(FakeAdapterProcessRunner process)
+    {
+        var operationIndex = Array.IndexOf(process.Arguments, "--operation");
+        Assert.True(operationIndex >= 0);
+        var operationPath = process.Arguments[operationIndex + 1];
+        return JsonDocument.Parse(File.ReadAllText(operationPath));
+    }
+
+    private static string AdapterResult(
+        string payload,
+        string contentType)
+    {
+        return $$"""
+            {
+              "message_type": "adapter.operation_result",
+              "protocol_version": "1.0",
+              "schema_version": "1.0",
+              "result_id": "result_cmd_1",
+              "operation_id": "cmd_1",
+              "status": "completed",
+              "completed_at": "1970-01-01T00:00:00Z",
+              "fencing_token": 1,
+              "correlation": {
+                "command_id": "cmd_1"
+              },
+              "extensions": {
+                "tradecraft.dev/payload": {{payload}},
+                "tradecraft.dev/payload_content_type": "{{contentType}}"
+              }
+            }
+            """;
+    }
+
+    private static string FailedAdapterResult(string summary)
+    {
+        return $$"""
+            {
+              "message_type": "adapter.operation_result",
+              "protocol_version": "1.0",
+              "schema_version": "1.0",
+              "result_id": "result_cmd_1",
+              "operation_id": "cmd_1",
+              "status": "failed",
+              "completed_at": "1970-01-01T00:00:00Z",
+              "fencing_token": 1,
+              "correlation": {
+                "command_id": "cmd_1"
+              },
+              "error": {
+                "code": "opencode_failed",
+                "classification": "internal_adapter_error",
+                "summary": "{{summary}}",
+                "retryable": false
+              }
+            }
+            """;
+    }
+
     private static string NewRuntimeRoot()
     {
         return Path.Combine(Path.GetTempPath(), $"runner_handler_{Guid.NewGuid():N}");
@@ -318,13 +391,7 @@ public sealed class CliRunnerCommandHandlerTests
             ArgumentPrefix = ["run", "lamplighter-opencode"],
             Commands = new RuntimeAdapterCommandOptions
             {
-                PrepareRuntime = "prepare-agent",
-                StartRuntime = "start-agent",
-                StopRuntime = "stop-agent",
-                CreateSession = "create-session",
-                StartInvocation = "submit-turn",
-                CloseSession = "cancel-session",
-                SynchronizeSessionHistory = "get-session-history"
+                Operation = "adapter-operation"
             }
         };
     }
