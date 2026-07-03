@@ -36,9 +36,11 @@ public sealed class CliRunnerCommandHandlerTests
         Assert.Equal("adapter.operation", operation.RootElement.GetProperty("message_type").GetString());
         Assert.Equal("StartRuntime", operation.RootElement.GetProperty("operation_type").GetString());
         Assert.Equal("agent_1", operation.RootElement.GetProperty("target").GetProperty("runtime_id").GetString());
+        Assert.Equal("agent_1", operation.RootElement.GetProperty("payload").GetProperty("agent_id").GetString());
         Assert.Equal(
             controllerWorkspace,
             operation.RootElement.GetProperty("extensions").GetProperty("tradecraft.dev/controller_workspace").GetString());
+        Assert.False(operation.RootElement.GetProperty("extensions").TryGetProperty("tradecraft.dev/payload", out _));
         Assert.Contains("adapter-operation", process.Arguments);
         Assert.Contains("--operation", process.Arguments);
         Assert.DoesNotContain("prepare-agent", process.Arguments);
@@ -158,6 +160,7 @@ public sealed class CliRunnerCommandHandlerTests
         Assert.Equal("ReadTranscript", operation.RootElement.GetProperty("operation_type").GetString());
         Assert.Equal("agent_1", operation.RootElement.GetProperty("target").GetProperty("runtime_id").GetString());
         Assert.Equal("session_1", operation.RootElement.GetProperty("target").GetProperty("agent_session_id").GetString());
+        Assert.False(operation.RootElement.TryGetProperty("payload", out _));
         Assert.Equal(
             controllerWorkspace,
             operation.RootElement.GetProperty("extensions").GetProperty("tradecraft.dev/controller_workspace").GetString());
@@ -257,7 +260,8 @@ public sealed class CliRunnerCommandHandlerTests
             ControllerWorkspace = controllerWorkspace,
             Adapter = OpenCodeCliAdapterOptions()
         });
-        var adapter = new CliAgentRuntimeAdapter(process, options);
+        var transport = new CliAdapterTransport(process, options);
+        var adapter = new CliAgentRuntimeAdapter(transport, options);
         return new CliRunnerCommandHandler(
             api,
             adapter,
@@ -331,6 +335,10 @@ public sealed class CliRunnerCommandHandlerTests
         string payload,
         string contentType)
     {
+        var payloadPath = Path.Combine(Path.GetTempPath(), $"adapter_result_{Guid.NewGuid():N}.json");
+        File.WriteAllText(payloadPath, payload);
+        var payloadBytes = System.Text.Encoding.UTF8.GetBytes(payload);
+        var sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(payloadBytes));
         return $$"""
             {
               "message_type": "adapter.operation_result",
@@ -344,9 +352,11 @@ public sealed class CliRunnerCommandHandlerTests
               "correlation": {
                 "command_id": "cmd_1"
               },
-              "extensions": {
-                "tradecraft.dev/payload": {{payload}},
-                "tradecraft.dev/payload_content_type": "{{contentType}}"
+              "result_ref": {
+                "uri": "{{new Uri(payloadPath).AbsoluteUri}}",
+                "sha256": "{{sha256}}",
+                "content_type": "{{contentType}}",
+                "length": {{payloadBytes.Length}}
               }
             }
             """;

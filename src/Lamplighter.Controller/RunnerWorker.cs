@@ -10,7 +10,7 @@ namespace Lamplighter.Controller;
 internal sealed class RunnerWorker(
     IOptions<RunnerOptions> options,
     IRunnerApiClient apiClient,
-    IOpenCodeHealthProbe healthProbe,
+    IAdapterRuntimeObserver runtimeObserver,
     RunnerCommandLoop commandLoop,
     ILogger<RunnerWorker> logger) : BackgroundService
 {
@@ -41,11 +41,7 @@ internal sealed class RunnerWorker(
 
     private async Task PublishHeartbeatAsync(CancellationToken cancellationToken)
     {
-        var agents = await RunnerAgentInventory.ScanAsync(
-            _options.ControllerWorkspace,
-            DateTimeOffset.UtcNow,
-            healthProbe,
-            cancellationToken);
+        var inventory = await runtimeObserver.ObserveAsync(cancellationToken);
         var heartbeat = new ControllerHeartbeat(
             MessageType: ControllerMessageTypes.Heartbeat,
             ProtocolVersion: ControllerProtocolVersions.Protocol,
@@ -55,64 +51,57 @@ internal sealed class RunnerWorker(
             ObservedAt: DateTimeOffset.UtcNow,
             ActiveCommandIds: [],
             Inventory: new ControllerInventory(
-                Runtimes: agents.Select(ToRuntimeResource).ToImmutableArray(),
-                Sessions: agents
+                Runtimes: inventory.Runtimes.Select(runtime => ToRuntimeResource(inventory, runtime)).ToImmutableArray(),
+                Sessions: inventory.Runtimes
                     .SelectMany(ToSessionResources)
                     .ToImmutableArray()),
             Extensions: ImmutableDictionary<string, JsonElement>.Empty.Add(
                 "tradecraft.adapter.capabilities",
-                JsonSerializer.SerializeToElement(new
-                {
-                    adapter_kind = "opencode",
-                    adapter_version = "0.1.0",
-                    snapshot_capture = true,
-                    snapshot_restore = true,
-                    restoration_modes = new[] { "inspection" },
-                    consistency_modes = new[] { "crash-consistent" },
-                    transfer_profiles = new[] { "local-content-handle" }
-                })));
+                inventory.Capabilities));
 
         await apiClient.UpsertHeartbeatAsync(heartbeat, cancellationToken);
         logger.LogInformation(
             "Runner heartbeat published with {AgentCount} local agents.",
-            agents.Count);
+            inventory.Runtimes.Count);
     }
 
-    private AgentRuntimeResource ToRuntimeResource(RunnerAgentInventoryItem agent)
+    private AgentRuntimeResource ToRuntimeResource(
+        AdapterRuntimeInventory inventory,
+        AdapterRuntimeInventoryItem runtime)
     {
         return new AgentRuntimeResource(
             DocumentType: "agent_runtime",
-            RuntimeId: agent.AgentId ?? agent.AgentSessionId,
+            RuntimeId: runtime.RuntimeId,
             ControllerId: _options.RunnerId,
-            Status: agent.Status,
-            AdapterKind: "opencode",
-            DeploymentMode: "local_process",
-            CreatedAt: agent.ObservedAt,
-            UpdatedAt: agent.ObservedAt,
+            Status: runtime.Status,
+            AdapterKind: inventory.AdapterKind,
+            DeploymentMode: inventory.DeploymentMode,
+            CreatedAt: runtime.ObservedAt,
+            UpdatedAt: runtime.ObservedAt,
             Extensions: ImmutableDictionary<string, JsonElement>.Empty.Add(
                 "tradecraft.poc",
                 JsonSerializer.SerializeToElement(new
                 {
-                    agent_session_id = agent.AgentSessionId,
-                    runtime_path = agent.RuntimePath,
-                    workspace_path = agent.WorkspacePath,
-                    opencode_endpoint = agent.OpenCodeEndpoint,
-                    opencode_pid = agent.OpenCodePid
+                    agent_session_id = runtime.AgentSessionId,
+                    runtime_path = runtime.RuntimePath,
+                    workspace_path = runtime.WorkspacePath,
+                    provider_endpoint = runtime.ProviderEndpoint,
+                    provider_pid = runtime.ProviderProcessId
                 })));
     }
 
     private static IEnumerable<AgentSessionResource> ToSessionResources(
-        RunnerAgentInventoryItem agent)
+        AdapterRuntimeInventoryItem runtime)
     {
-        return (agent.Sessions ?? [])
+        return runtime.Sessions
             .Select(session => new AgentSessionResource(
                 DocumentType: "agent_session",
                 AgentSessionId: session.SessionId,
-                RuntimeId: agent.AgentId ?? agent.AgentSessionId,
+                RuntimeId: runtime.RuntimeId,
                 Status: session.Status,
                 CreatedAt: session.ObservedAt,
                 UpdatedAt: session.ObservedAt,
-                ProviderSessionRef: session.OpenCodeSessionId,
+                ProviderSessionRef: session.ProviderSessionRef,
                 TranscriptAuthority: "provider",
                 Extensions: ImmutableDictionary<string, JsonElement>.Empty.Add(
                     "tradecraft.poc",

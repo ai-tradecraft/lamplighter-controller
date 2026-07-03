@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
@@ -67,7 +69,7 @@ internal sealed record AgentRuntimeAdapterResult(
         return new AgentRuntimeAdapterResult(true, payload, contentType);
     }
 
-    public static AgentRuntimeAdapterResult Failure(ProcessOutput output)
+    public static AgentRuntimeAdapterResult Failure(AdapterTransportResult output)
     {
         var diagnostics = $"""
             command: {output.Command}
@@ -91,11 +93,9 @@ internal sealed record AgentRuntimeAdapterResult(
 }
 
 internal sealed class CliAgentRuntimeAdapter(
-    IAdapterProcessRunner processRunner,
+    IAdapterTransport transport,
     IOptions<RunnerOptions> options) : IAgentRuntimeAdapter
 {
-    private const string PayloadExtensionName = "tradecraft.dev/payload";
-    private const string PayloadContentTypeExtensionName = "tradecraft.dev/payload_content_type";
     private const string ControllerWorkspaceExtensionName = "tradecraft.dev/controller_workspace";
 
     private readonly RunnerOptions _options = options.Value;
@@ -104,7 +104,7 @@ internal sealed class CliAgentRuntimeAdapter(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken)
     {
-        var output = await RunOperationAsync("StartRuntime", request, cancellationToken)
+        var output = await SendOperationAsync("StartRuntime", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.start-agent-result+json");
     }
@@ -113,7 +113,7 @@ internal sealed class CliAgentRuntimeAdapter(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken)
     {
-        var output = await RunOperationAsync("StopRuntime", request, cancellationToken)
+        var output = await SendOperationAsync("StopRuntime", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.stop-agent-result+json");
     }
@@ -122,7 +122,7 @@ internal sealed class CliAgentRuntimeAdapter(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken)
     {
-        var output = await RunOperationAsync("CreateSession", request, cancellationToken)
+        var output = await SendOperationAsync("CreateSession", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.create-session-result+json");
     }
@@ -131,7 +131,7 @@ internal sealed class CliAgentRuntimeAdapter(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken)
     {
-        var output = await RunOperationAsync("StartInvocation", request, cancellationToken)
+        var output = await SendOperationAsync("StartInvocation", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.agent-turn-result+json");
     }
@@ -140,7 +140,7 @@ internal sealed class CliAgentRuntimeAdapter(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken)
     {
-        var output = await RunOperationAsync("CloseSession", request, cancellationToken)
+        var output = await SendOperationAsync("CloseSession", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.cancel-session-result+json");
     }
@@ -149,46 +149,25 @@ internal sealed class CliAgentRuntimeAdapter(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken)
     {
-        var output = await RunOperationAsync("ReadTranscript", request, cancellationToken)
+        var output = await SendOperationAsync("ReadTranscript", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.agent-chat-history+json");
     }
 
-    private async Task<ProcessOutput> RunOperationAsync(
+    private async Task<AdapterTransportResult> SendOperationAsync(
         string operationType,
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken)
     {
-        var operationPath = await WriteAdapterOperationAsync(
-                operationType,
-                request,
-                cancellationToken)
-            .ConfigureAwait(false);
-        var arguments = _options.Adapter.ArgumentPrefix
-            .Concat([
-                _options.Adapter.Commands.Operation,
-                "--operation", operationPath,
-                "--json"
-            ])
-            .ToArray();
-        return await processRunner.RunAsync(
-                _options.Adapter.Executable,
-                arguments,
-                cancellationToken)
+        var operation = CreateAdapterOperation(operationType, request);
+        return await transport.SendAsync(operation, request.CommandId, cancellationToken)
             .ConfigureAwait(false);
     }
 
-    private async Task<string> WriteAdapterOperationAsync(
+    private JsonObject CreateAdapterOperation(
         string operationType,
-        AgentRuntimeAdapterRequest request,
-        CancellationToken cancellationToken)
+        AgentRuntimeAdapterRequest request)
     {
-        var commandRoot = Path.Combine(
-            _options.ControllerWorkspace,
-            "commands",
-            SafeIdentifier(request.CommandId, "cmd_"));
-        Directory.CreateDirectory(commandRoot);
-        var path = Path.Combine(commandRoot, "adapter-operation.json");
         var operation = new JsonObject
         {
             ["message_type"] = "adapter.operation",
@@ -203,31 +182,47 @@ internal sealed class CliAgentRuntimeAdapter(
             ["correlation"] = JsonSerializer.SerializeToNode(request.Correlation, ControllerProtocolJson.Options),
             ["authorization_context"] = JsonSerializer.SerializeToNode(
                 request.AuthorizationContext,
-                ControllerProtocolJson.Options)
-        };
-        var extensions = new JsonObject
-        {
-            [ControllerWorkspaceExtensionName] = _options.ControllerWorkspace
+                ControllerProtocolJson.Options),
+            ["extensions"] = new JsonObject
+            {
+                [ControllerWorkspaceExtensionName] = _options.ControllerWorkspace
+            }
         };
         if (!string.IsNullOrWhiteSpace(request.Payload))
         {
-            extensions[PayloadExtensionName] = JsonNode.Parse(request.Payload);
-            if (!string.IsNullOrWhiteSpace(request.PayloadContentType))
+            if (string.Equals(operationType, "StartInvocation", StringComparison.Ordinal))
             {
-                extensions[PayloadContentTypeExtensionName] = request.PayloadContentType;
+                operation["payload_ref"] = JsonSerializer.SerializeToNode(
+                    CreateLocalPayloadReference(request),
+                    ControllerProtocolJson.Options);
+            }
+            else
+            {
+                operation["payload"] = JsonNode.Parse(request.Payload);
             }
         }
-        operation["extensions"] = extensions;
-        await File.WriteAllTextAsync(
-                path,
-                operation.ToJsonString(ControllerProtocolJson.Options),
-                cancellationToken)
-            .ConfigureAwait(false);
-        return path;
+        return operation;
+    }
+
+    private ContentReference CreateLocalPayloadReference(AgentRuntimeAdapterRequest request)
+    {
+        var commandRoot = Path.Combine(
+            _options.ControllerWorkspace,
+            "commands",
+            AdapterIdentifier.Safe(request.CommandId, "cmd_"));
+        Directory.CreateDirectory(commandRoot);
+        var path = Path.Combine(commandRoot, "adapter-payload.json");
+        var payloadBytes = Encoding.UTF8.GetBytes(request.Payload ?? "");
+        File.WriteAllBytes(path, payloadBytes);
+        return new ContentReference(
+            new Uri(path).AbsoluteUri,
+            Convert.ToHexStringLower(SHA256.HashData(payloadBytes)),
+            request.PayloadContentType ?? "application/json",
+            payloadBytes.Length);
     }
 
     private static AgentRuntimeAdapterResult Complete(
-        ProcessOutput output,
+        AdapterTransportResult output,
         string successContentType)
     {
         if (output.ExitCode != 0)
@@ -257,18 +252,9 @@ internal sealed class CliAgentRuntimeAdapter(
                     output.Stderr);
             }
 
-            if (root.TryGetProperty("extensions", out var extensions)
-                && extensions.TryGetProperty(PayloadExtensionName, out var payload))
+            if (root.TryGetProperty("result_ref", out var resultRef))
             {
-                var contentType = successContentType;
-                if (extensions.TryGetProperty(PayloadContentTypeExtensionName, out var contentTypeElement)
-                    && contentTypeElement.ValueKind == JsonValueKind.String
-                    && !string.IsNullOrWhiteSpace(contentTypeElement.GetString()))
-                {
-                    contentType = contentTypeElement.GetString()!;
-                }
-
-                return AgentRuntimeAdapterResult.Success(payload.GetRawText(), contentType);
+                return CompleteFromResultReference(output, resultRef, successContentType);
             }
 
             return AgentRuntimeAdapterResult.Success(output.Stdout, "application/vnd.tradecraft.adapter-operation-result+json");
@@ -286,7 +272,112 @@ internal sealed class CliAgentRuntimeAdapter(
         }
     }
 
+    private static AgentRuntimeAdapterResult CompleteFromResultReference(
+        AdapterTransportResult output,
+        JsonElement resultRef,
+        string fallbackContentType)
+    {
+        try
+        {
+            var uri = resultRef.GetProperty("uri").GetString();
+            var contentType = resultRef.TryGetProperty("content_type", out var contentTypeElement)
+                && contentTypeElement.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(contentTypeElement.GetString())
+                    ? contentTypeElement.GetString()!
+                    : fallbackContentType;
+            if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+                || !string.Equals(parsed.Scheme, Uri.UriSchemeFile, StringComparison.OrdinalIgnoreCase))
+            {
+                return new AgentRuntimeAdapterResult(
+                    false,
+                    $"Runtime adapter returned unsupported result_ref URI: {uri}.",
+                    "text/plain",
+                    output.Command,
+                    output.ExitCode,
+                    output.Stdout,
+                    output.Stderr);
+            }
+
+            return AgentRuntimeAdapterResult.Success(File.ReadAllText(parsed.LocalPath), contentType);
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return new AgentRuntimeAdapterResult(
+                false,
+                $"Runtime adapter result_ref could not be read: {ex.Message}",
+                "text/plain",
+                output.Command,
+                output.ExitCode,
+                output.Stdout,
+                output.Stderr);
+        }
+    }
+}
+
+internal interface IAdapterTransport
+{
+    Task<AdapterTransportResult> SendAsync(
+        JsonObject operation,
+        string operationId,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class CliAdapterTransport(
+    IAdapterProcessRunner processRunner,
+    IOptions<RunnerOptions> options) : IAdapterTransport
+{
+    private readonly RunnerOptions _options = options.Value;
+
+    public async Task<AdapterTransportResult> SendAsync(
+        JsonObject operation,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var operationPath = await WriteAdapterOperationAsync(operation, operationId, cancellationToken)
+            .ConfigureAwait(false);
+        var arguments = _options.Adapter.ArgumentPrefix
+            .Concat([
+                _options.Adapter.Commands.Operation,
+                "--operation", operationPath,
+                "--json"
+            ])
+            .ToArray();
+        var output = await processRunner.RunAsync(
+                _options.Adapter.Executable,
+                arguments,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return new AdapterTransportResult(output.Command, output.ExitCode, output.Stdout, output.Stderr);
+    }
+
+    private async Task<string> WriteAdapterOperationAsync(
+        JsonObject operation,
+        string operationId,
+        CancellationToken cancellationToken)
+    {
+        var commandRoot = Path.Combine(
+            _options.ControllerWorkspace,
+            "commands",
+            SafeIdentifier(operationId, "cmd_"));
+        Directory.CreateDirectory(commandRoot);
+        var path = Path.Combine(commandRoot, "adapter-operation.json");
+        await File.WriteAllTextAsync(
+                path,
+                operation.ToJsonString(ControllerProtocolJson.Options),
+                cancellationToken)
+            .ConfigureAwait(false);
+        return path;
+    }
+
     private static string SafeIdentifier(string value, string prefix)
+    {
+        return AdapterIdentifier.Safe(value, prefix);
+    }
+}
+
+internal static class AdapterIdentifier
+{
+    public static string Safe(string value, string prefix)
     {
         if (!value.StartsWith(prefix, StringComparison.Ordinal)
             || value.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-'))
@@ -411,3 +502,5 @@ internal sealed class CliAdapterProcessRunner(
 }
 
 internal sealed record ProcessOutput(string Command, int ExitCode, string Stdout, string Stderr);
+
+internal sealed record AdapterTransportResult(string Command, int ExitCode, string Stdout, string Stderr);

@@ -6,7 +6,7 @@ edge of a deployment.
 The controller speaks the stable northbound protocol to the Tradecraft
 orchestrator and delegates provider/deployment-specific model access to runtime
 adapters. The current POC adapter is `lamplighter-opencode`, invoked as a local
-CLI from this controller through a single `adapter-operation` envelope command.
+CLI transport from this controller.
 
 ## Boundaries
 
@@ -16,9 +16,19 @@ CLI from this controller through a single `adapter-operation` envelope command.
   `../tradecraft-contracts/contracts/agent-runtime/v1/schemas/runtime-adapter-message.schema.json`.
   The controller's C# `IAgentRuntimeAdapter` is an internal port that maps
   controller commands onto that provider-neutral operation model.
-- The configured CLI adapter sends `adapter.operation` envelopes and expects
-  `adapter.operation_result` envelopes back. Provider-specific commands such
-  as OpenCode session creation remain inside the adapter package.
+- `IAdapterTransport` carries those operation envelopes. The default
+  `CliAdapterTransport` writes an `adapter.operation` file, invokes the
+  configured adapter command, and reads an `adapter.operation_result` envelope
+  back. Provider-specific commands such as OpenCode session creation remain
+  inside the adapter package.
+- Inline request data uses the shared envelope's top-level `payload` when the
+  v1 schema supports that operation. Legacy/narrow turn input currently uses a
+  local first-class `payload_ref`. Adapter results return a first-class
+  `result_ref`; the controller dereferences that local handle and publishes the
+  result through the orchestrator content path.
+- Runtime heartbeat inventory comes from the configured adapter observation
+  command. The controller no longer parses OpenCode runtime files or probes
+  OpenCode health endpoints directly.
 - OpenCode adapter payload schemas live in
   `../tradecraft-contracts/contracts/lamplighter-opencode/schemas`.
 - The controller does not own provider/model configuration. It passes work to
