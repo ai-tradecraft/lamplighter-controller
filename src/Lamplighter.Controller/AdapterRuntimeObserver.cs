@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Tradecraft.Contracts.AgentRuntime.V1;
 
 namespace Lamplighter.Controller;
 
@@ -36,33 +37,38 @@ internal sealed record AdapterRuntimeSessionInventoryItem(
     DateTimeOffset ObservedAt);
 
 internal sealed class CliAdapterRuntimeObserver(
-    IAdapterProcessRunner processRunner,
+    IAgentRuntimeAdapter runtimeAdapter,
     IOptions<RunnerOptions> options) : IAdapterRuntimeObserver
 {
     private readonly RunnerOptions _options = options.Value;
 
     public async Task<AdapterRuntimeInventory> ObserveAsync(CancellationToken cancellationToken)
     {
-        var arguments = _options.Adapter.ArgumentPrefix
-            .Concat([
-                _options.Adapter.Commands.ObserveRuntimes,
-                "--controller-workspace", _options.ControllerWorkspace,
-                "--json"
-            ])
-            .ToArray();
-        var output = await processRunner.RunAsync(
-                _options.Adapter.Executable,
-                arguments,
+        var now = DateTimeOffset.UtcNow;
+        var output = await runtimeAdapter.InspectRuntimeAsync(
+                new AgentRuntimeAdapterRequest(
+                    CommandId: "cmd_runtime_inspect",
+                    Target: new ResourceTarget(ControllerId: _options.RunnerId),
+                    IdempotencyKey: $"runtime-inspect:{_options.RunnerId}",
+                    Deadline: now.Add(_options.HeartbeatInterval),
+                    FencingToken: 1,
+                    Correlation: new ProtocolCorrelation(
+                        CommandId: "cmd_runtime_inspect",
+                        CorrelationId: $"runtime-inspect:{_options.RunnerId}"),
+                    AuthorizationContext: new AuthorizationContext(
+                        "system://lamplighter-controller",
+                        $"authorization-grant://controller/{Uri.EscapeDataString(_options.RunnerId)}",
+                        now)),
                 cancellationToken)
             .ConfigureAwait(false);
-        if (output.ExitCode != 0)
+        if (!output.Succeeded)
         {
             return EmptyInventory(DateTimeOffset.UtcNow);
         }
 
         try
         {
-            return ParseInventory(output.Stdout);
+            return ParseInventory(output.Payload);
         }
         catch (JsonException)
         {

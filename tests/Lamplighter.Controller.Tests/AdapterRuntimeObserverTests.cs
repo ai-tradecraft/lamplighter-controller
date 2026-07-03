@@ -6,11 +6,10 @@ namespace Lamplighter.Controller.Tests;
 public sealed class AdapterRuntimeObserverTests
 {
     [Fact]
-    public async Task ObserveAsync_InvokesConfiguredAdapterObservationCommand()
+    public async Task ObserveAsync_UsesRuntimeAdapterInspectRuntimeOperation()
     {
-        var process = new FakeAdapterProcessRunner(new ProcessOutput(
-            "uv run lamplighter-opencode observe-runtimes",
-            0,
+        var adapter = new FakeRuntimeAdapter(new AgentRuntimeAdapterResult(
+            true,
             """
             {
               "adapter_kind": "opencode",
@@ -44,20 +43,22 @@ public sealed class AdapterRuntimeObserverTests
               ]
             }
             """,
-            ""));
-        var observer = new CliAdapterRuntimeObserver(process, Options.Create(new RunnerOptions
+            "application/vnd.tradecraft.runtime-inventory+json"));
+        var observer = new CliAdapterRuntimeObserver(adapter, Options.Create(new RunnerOptions
         {
+            RunnerId = "controller_1",
             ControllerWorkspace = "/tmp/controller",
-            Adapter = OpenCodeCliAdapterOptions()
+            Adapter = new RuntimeAdapterOptions()
         }));
 
         var inventory = await observer.ObserveAsync(CancellationToken.None);
 
+        Assert.Equal(1, adapter.InspectRuntimeCallCount);
+        Assert.Equal("cmd_runtime_inspect", adapter.LastRequest?.CommandId);
+        Assert.Equal("controller_1", adapter.LastRequest?.Target.ControllerId);
         Assert.Equal("opencode", inventory.AdapterKind);
         Assert.Equal("local_process", inventory.DeploymentMode);
         Assert.True(inventory.Capabilities.GetProperty("snapshot_capture").GetBoolean());
-        Assert.Contains("observe-runtimes", process.Arguments);
-        Assert.Contains("--controller-workspace", process.Arguments);
         var runtime = Assert.Single(inventory.Runtimes);
         Assert.Equal("agent_1", runtime.RuntimeId);
         Assert.Equal("ready", runtime.Status);
@@ -70,15 +71,12 @@ public sealed class AdapterRuntimeObserverTests
     [Fact]
     public async Task ObserveAsync_WhenAdapterFails_ReturnsEmptyInventory()
     {
-        var process = new FakeAdapterProcessRunner(new ProcessOutput(
-            "uv run lamplighter-opencode observe-runtimes",
-            1,
-            "",
-            "boom"));
-        var observer = new CliAdapterRuntimeObserver(process, Options.Create(new RunnerOptions
+        var adapter = new FakeRuntimeAdapter(new AgentRuntimeAdapterResult(false, "boom", "text/plain"));
+        var observer = new CliAdapterRuntimeObserver(adapter, Options.Create(new RunnerOptions
         {
+            RunnerId = "controller_1",
             ControllerWorkspace = "/tmp/controller",
-            Adapter = OpenCodeCliAdapterOptions()
+            Adapter = new RuntimeAdapterOptions()
         }));
 
         var inventory = await observer.ObserveAsync(CancellationToken.None);
@@ -87,35 +85,43 @@ public sealed class AdapterRuntimeObserverTests
         Assert.Equal("unknown", inventory.AdapterKind);
     }
 
-    private static RuntimeAdapterOptions OpenCodeCliAdapterOptions()
+    private sealed class FakeRuntimeAdapter(AgentRuntimeAdapterResult result) : IAgentRuntimeAdapter
     {
-        return new RuntimeAdapterOptions
-        {
-            Kind = "opencode-cli",
-            Executable = "uv",
-            ArgumentPrefix = ["run", "lamplighter-opencode"],
-            Commands = new RuntimeAdapterCommandOptions
-            {
-                Operation = "adapter-operation",
-                ObserveRuntimes = "observe-runtimes"
-            }
-        };
-    }
+        public int InspectRuntimeCallCount { get; private set; }
 
-    private sealed class FakeAdapterProcessRunner(params ProcessOutput[] outputs)
-        : IAdapterProcessRunner
-    {
-        private readonly Queue<ProcessOutput> _outputs = new(outputs);
+        public AgentRuntimeAdapterRequest? LastRequest { get; private set; }
 
-        public string[] Arguments { get; private set; } = [];
-
-        public Task<ProcessOutput> RunAsync(
-            string fileName,
-            string[] arguments,
+        public Task<AgentRuntimeAdapterResult> InspectRuntimeAsync(
+            AgentRuntimeAdapterRequest request,
             CancellationToken cancellationToken)
         {
-            Arguments = arguments;
-            return Task.FromResult(_outputs.Dequeue());
+            InspectRuntimeCallCount++;
+            LastRequest = request;
+            return Task.FromResult(result);
         }
+
+        public Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<AgentRuntimeAdapterResult> StopRuntimeAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<AgentRuntimeAdapterResult> CreateSessionAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<AgentRuntimeAdapterResult> StartInvocationAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<AgentRuntimeAdapterResult> CloseSessionAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<AgentRuntimeAdapterResult> SynchronizeSessionHistoryAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

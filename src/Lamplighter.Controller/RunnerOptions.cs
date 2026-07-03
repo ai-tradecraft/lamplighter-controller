@@ -25,5 +25,4 @@ internal sealed record RuntimeAdapterOptions
 internal sealed record RuntimeAdapterCommandOptions
 {
     public string Operation { get; init; } = "adapter-operation";
-    public string ObserveRuntimes { get; init; } = "observe-runtimes";
 }

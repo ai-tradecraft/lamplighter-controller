@@ -12,6 +12,10 @@ namespace Lamplighter.Controller;
 
 internal interface IAgentRuntimeAdapter
 {
+    Task<AgentRuntimeAdapterResult> InspectRuntimeAsync(
+        AgentRuntimeAdapterRequest request,
+        CancellationToken cancellationToken);
+
     Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken);
@@ -97,8 +101,18 @@ internal sealed class CliAgentRuntimeAdapter(
     IOptions<RunnerOptions> options) : IAgentRuntimeAdapter
 {
     private const string ControllerWorkspaceExtensionName = "tradecraft.dev/controller_workspace";
+    private const string LegacyTurnRequestExtensionName = "tradecraft.dev/legacy_turn_request_ref";
 
     private readonly RunnerOptions _options = options.Value;
+
+    public async Task<AgentRuntimeAdapterResult> InspectRuntimeAsync(
+        AgentRuntimeAdapterRequest request,
+        CancellationToken cancellationToken)
+    {
+        var output = await SendOperationAsync("InspectRuntime", request, cancellationToken)
+            .ConfigureAwait(false);
+        return Complete(output, "application/vnd.tradecraft.runtime-inventory+json");
+    }
 
     public async Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
         AgentRuntimeAdapterRequest request,
@@ -192,33 +206,88 @@ internal sealed class CliAgentRuntimeAdapter(
         {
             if (string.Equals(operationType, "StartInvocation", StringComparison.Ordinal))
             {
-                operation["payload_ref"] = JsonSerializer.SerializeToNode(
-                    CreateLocalPayloadReference(request),
-                    ControllerProtocolJson.Options);
+                operation["payload"] = CreateInvocationInputPayload(request);
             }
             else
             {
                 operation["payload"] = JsonNode.Parse(request.Payload);
             }
         }
+        RuntimeAdapterEnvelopeValidator.ValidateOperation(operation);
         return operation;
     }
 
-    private ContentReference CreateLocalPayloadReference(AgentRuntimeAdapterRequest request)
+    private JsonObject CreateInvocationInputPayload(AgentRuntimeAdapterRequest request)
+    {
+        var legacyTurnRequestRef = CreateLocalContentReference(
+            request,
+            "legacy-turn-request.json",
+            request.Payload ?? "",
+            request.PayloadContentType ?? "application/json");
+        var instruction = TryReadInstruction(request.Payload);
+        var instructionRef = CreateLocalContentReference(
+            request,
+            "instruction.md",
+            instruction,
+            "text/markdown");
+        return new JsonObject
+        {
+            ["document_type"] = "invocation_input",
+            ["invocation_id"] = request.InvocationId ?? request.CommandId,
+            ["agent_spec_ref"] = $"agent-spec://{Uri.EscapeDataString(request.RuntimeId ?? "unknown")}",
+            ["context_package_ref"] = $"context-package://{Uri.EscapeDataString(request.CommandId)}",
+            ["instruction_ref"] = JsonSerializer.SerializeToNode(instructionRef, ControllerProtocolJson.Options),
+            ["completion_contract_ref"] = "completion-contract://tradecraft/default",
+            ["deadline"] = request.Deadline.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+            ["extensions"] = new JsonObject
+            {
+                [LegacyTurnRequestExtensionName] = JsonSerializer.SerializeToNode(
+                    legacyTurnRequestRef,
+                    ControllerProtocolJson.Options)
+            }
+        };
+    }
+
+    private ContentReference CreateLocalContentReference(
+        AgentRuntimeAdapterRequest request,
+        string fileName,
+        string content,
+        string contentType)
     {
         var commandRoot = Path.Combine(
             _options.ControllerWorkspace,
             "commands",
             AdapterIdentifier.Safe(request.CommandId, "cmd_"));
         Directory.CreateDirectory(commandRoot);
-        var path = Path.Combine(commandRoot, "adapter-payload.json");
-        var payloadBytes = Encoding.UTF8.GetBytes(request.Payload ?? "");
-        File.WriteAllBytes(path, payloadBytes);
+        var path = Path.Combine(commandRoot, fileName);
+        var contentBytes = Encoding.UTF8.GetBytes(content);
+        File.WriteAllBytes(path, contentBytes);
         return new ContentReference(
             new Uri(path).AbsoluteUri,
-            Convert.ToHexStringLower(SHA256.HashData(payloadBytes)),
-            request.PayloadContentType ?? "application/json",
-            payloadBytes.Length);
+            Convert.ToHexStringLower(SHA256.HashData(contentBytes)),
+            contentType,
+            contentBytes.Length);
+    }
+
+    private static string TryReadInstruction(string? payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return "";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            return document.RootElement.TryGetProperty("instruction", out var instruction)
+                && instruction.ValueKind == JsonValueKind.String
+                    ? instruction.GetString() ?? ""
+                    : "";
+        }
+        catch (JsonException)
+        {
+            return "";
+        }
     }
 
     private static AgentRuntimeAdapterResult Complete(
@@ -234,6 +303,7 @@ internal sealed class CliAgentRuntimeAdapter(
         {
             using var result = JsonDocument.Parse(output.Stdout);
             var root = result.RootElement;
+            RuntimeAdapterEnvelopeValidator.ValidateResult(root);
             var status = root.GetProperty("status").GetString();
             if (!string.Equals(status, "completed", StringComparison.Ordinal))
             {
@@ -375,6 +445,184 @@ internal sealed class CliAdapterTransport(
     }
 }
 
+internal static class RuntimeAdapterEnvelopeValidator
+{
+    private static readonly HashSet<string> OperationTypes = new(StringComparer.Ordinal)
+    {
+        "DescribeAdapter",
+        "ValidateRuntimeSpec",
+        "CheckReadiness",
+        "PrepareRuntime",
+        "StartRuntime",
+        "InspectRuntime",
+        "StopRuntime",
+        "TerminateRuntime",
+        "ReconcileRuntime",
+        "CreateSession",
+        "InspectSession",
+        "CloseSession",
+        "ReadTranscript",
+        "PrepareInvocation",
+        "StartInvocation",
+        "SendInvocationInput",
+        "PauseInvocation",
+        "ResumeInvocation",
+        "CancelInvocation",
+        "TerminateInvocation",
+        "InspectInvocation",
+        "OpenInteractionChannel",
+        "SendInteractionInput",
+        "AcknowledgeInteractionMessage",
+        "CloseInteractionChannel",
+        "CreateSnapshot",
+        "RestoreSnapshot",
+        "CollectArtifacts",
+        "CollectDiagnostics"
+    };
+
+    public static void ValidateOperation(JsonObject operation)
+    {
+        RequireString(operation, "message_type", "adapter.operation");
+        RequireString(operation, "protocol_version", ControllerProtocolVersions.Protocol);
+        RequireString(operation, "schema_version", ControllerProtocolVersions.Schema);
+        RequireString(operation, "operation_id");
+        var operationType = RequireString(operation, "operation_type");
+        if (!OperationTypes.Contains(operationType))
+        {
+            throw new InvalidOperationException($"Unsupported adapter operation_type: {operationType}");
+        }
+        RequireString(operation, "idempotency_key");
+        RequireObject(operation, "target");
+        RequireString(operation, "deadline");
+        RequireNumber(operation, "fencing_token");
+        RequireObject(operation, "correlation");
+        RequireObject(operation, "authorization_context");
+        if (operation.ContainsKey("payload") && operation.ContainsKey("payload_ref"))
+        {
+            throw new InvalidOperationException("Adapter operation cannot contain both payload and payload_ref.");
+        }
+        if (operation.TryGetPropertyValue("extensions", out var extensions)
+            && extensions is JsonObject extensionObject
+            && extensionObject.ContainsKey("tradecraft.dev/payload"))
+        {
+            throw new InvalidOperationException("Adapter operation must not use legacy tradecraft.dev/payload extension.");
+        }
+        if (string.Equals(operationType, "StartInvocation", StringComparison.Ordinal))
+        {
+            ValidateInvocationInputPayload(operation);
+        }
+    }
+
+    public static void ValidateResult(JsonElement result)
+    {
+        RequireString(result, "message_type", "adapter.operation_result");
+        RequireString(result, "protocol_version", ControllerProtocolVersions.Protocol);
+        RequireString(result, "schema_version", ControllerProtocolVersions.Schema);
+        RequireString(result, "result_id");
+        RequireString(result, "operation_id");
+        var status = RequireString(result, "status");
+        if (status is not "completed" and not "failed" and not "cancelled")
+        {
+            throw new JsonException($"Unsupported adapter operation_result status: {status}");
+        }
+        RequireString(result, "completed_at");
+        RequireNumber(result, "fencing_token");
+        RequireObject(result, "correlation");
+        if (status == "failed")
+        {
+            RequireObject(result, "error");
+        }
+        if (status == "completed" && !result.TryGetProperty("result_ref", out _))
+        {
+            throw new JsonException("Completed adapter operation_result must include result_ref.");
+        }
+    }
+
+    private static void ValidateInvocationInputPayload(JsonObject operation)
+    {
+        if (!operation.TryGetPropertyValue("payload", out var payload) || payload is not JsonObject payloadObject)
+        {
+            throw new InvalidOperationException("StartInvocation must contain a v1 invocation_input payload.");
+        }
+        RequireString(payloadObject, "document_type", "invocation_input");
+        RequireString(payloadObject, "invocation_id");
+        RequireString(payloadObject, "agent_spec_ref");
+        RequireString(payloadObject, "context_package_ref");
+        RequireObject(payloadObject, "instruction_ref");
+        RequireString(payloadObject, "completion_contract_ref");
+    }
+
+    private static string RequireString(JsonObject value, string propertyName, string? expected = null)
+    {
+        if (!value.TryGetPropertyValue(propertyName, out var node)
+            || node is not JsonValue jsonValue
+            || !jsonValue.TryGetValue<string>(out var actual)
+            || string.IsNullOrWhiteSpace(actual))
+        {
+            throw new InvalidOperationException($"Adapter operation {propertyName} must be a non-empty string.");
+        }
+        if (expected is not null && !string.Equals(actual, expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Adapter operation {propertyName} must be {expected}.");
+        }
+        return actual;
+    }
+
+    private static string RequireString(JsonElement value, string propertyName, string? expected = null)
+    {
+        if (!value.TryGetProperty(propertyName, out var element)
+            || element.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(element.GetString()))
+        {
+            throw new JsonException($"Adapter operation_result {propertyName} must be a non-empty string.");
+        }
+        var actual = element.GetString()!;
+        if (expected is not null && !string.Equals(actual, expected, StringComparison.Ordinal))
+        {
+            throw new JsonException($"Adapter operation_result {propertyName} must be {expected}.");
+        }
+        return actual;
+    }
+
+    private static void RequireObject(JsonObject value, string propertyName)
+    {
+        if (!value.TryGetPropertyValue(propertyName, out var node) || node is not JsonObject)
+        {
+            throw new InvalidOperationException($"Adapter operation {propertyName} must be an object.");
+        }
+    }
+
+    private static void RequireObject(JsonElement value, string propertyName)
+    {
+        if (!value.TryGetProperty(propertyName, out var element) || element.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException($"Adapter operation_result {propertyName} must be an object.");
+        }
+    }
+
+    private static void RequireNumber(JsonObject value, string propertyName)
+    {
+        if (!value.TryGetPropertyValue(propertyName, out var node)
+            || node is not JsonValue jsonValue
+            || !jsonValue.TryGetValue<long>(out var number)
+            || number < 1)
+        {
+            throw new InvalidOperationException($"Adapter operation {propertyName} must be a positive integer.");
+        }
+    }
+
+    private static void RequireNumber(JsonElement value, string propertyName)
+    {
+        if (!value.TryGetProperty(propertyName, out var element)
+            || element.ValueKind != JsonValueKind.Number
+            || !element.TryGetInt64(out var number)
+            || number < 1)
+        {
+            throw new JsonException($"Adapter operation_result {propertyName} must be a positive integer.");
+        }
+    }
+}
+
 internal static class AdapterIdentifier
 {
     public static string Safe(string value, string prefix)
@@ -468,23 +716,7 @@ internal sealed class CliAdapterProcessRunner(
             return Path.GetFullPath(_options.Adapter.WorkingDirectory);
         }
 
-        var current = AppContext.BaseDirectory;
-        while (!string.IsNullOrWhiteSpace(current))
-        {
-            if (File.Exists(Path.Combine(current, "pyproject.toml")) && Directory.Exists(Path.Combine(current, "src", "lamplighter_opencode")))
-            {
-                return current;
-            }
-
-            var parent = Directory.GetParent(current)?.FullName;
-            if (parent == current)
-            {
-                break;
-            }
-            current = parent ?? "";
-        }
-
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        return Environment.CurrentDirectory;
     }
 
     internal static void ConfigureAdapterProcessEnvironment(IDictionary<string, string?> environment)

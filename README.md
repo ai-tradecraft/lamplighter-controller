@@ -21,14 +21,17 @@ CLI transport from this controller.
   configured adapter command, and reads an `adapter.operation_result` envelope
   back. Provider-specific commands such as OpenCode session creation remain
   inside the adapter package.
-- Inline request data uses the shared envelope's top-level `payload` when the
-  v1 schema supports that operation. Legacy/narrow turn input currently uses a
-  local first-class `payload_ref`. Adapter results return a first-class
-  `result_ref`; the controller dereferences that local handle and publishes the
-  result through the orchestrator content path.
-- Runtime heartbeat inventory comes from the configured adapter observation
-  command. The controller no longer parses OpenCode runtime files or probes
-  OpenCode health endpoints directly.
+- Controller-built operations and adapter results are validated against the
+  runtime-adapter envelope invariants before they cross the controller boundary.
+- Invocation input is normalized into the v1 `invocation_input` payload shape.
+  The current OpenCode POC still receives its narrow legacy turn request through
+  a namespaced content reference inside that payload's `extensions`.
+- Adapter results return a first-class `result_ref`; the controller dereferences
+  that local handle and publishes the result through the orchestrator content
+  path.
+- Runtime heartbeat inventory is requested through the same adapter operation
+  path using `InspectRuntime`. The controller no longer parses OpenCode runtime
+  files or probes OpenCode health endpoints directly.
 - OpenCode adapter payload schemas live in
   `../tradecraft-contracts/contracts/lamplighter-opencode/schemas`.
 - The controller does not own provider/model configuration. It passes work to

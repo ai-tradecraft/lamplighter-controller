@@ -113,7 +113,14 @@ public sealed class CliRunnerCommandHandlerTests
         Assert.Equal(
             ProtocolErrorClassifications.AdapterFailure,
             Assert.IsType<ProtocolError>(result.Error).Classification);
-        Assert.Equal("StartInvocation", ReadOperation(process).RootElement.GetProperty("operation_type").GetString());
+        var operation = ReadOperation(process);
+        Assert.Equal("StartInvocation", operation.RootElement.GetProperty("operation_type").GetString());
+        var payload = operation.RootElement.GetProperty("payload");
+        Assert.Equal("invocation_input", payload.GetProperty("document_type").GetString());
+        Assert.Equal("turn_1", payload.GetProperty("invocation_id").GetString());
+        Assert.True(payload.GetProperty("instruction_ref").TryGetProperty("uri", out _));
+        Assert.True(payload.GetProperty("extensions").TryGetProperty("tradecraft.dev/legacy_turn_request_ref", out _));
+        Assert.False(operation.RootElement.TryGetProperty("payload_ref", out _));
         Assert.Contains("adapter-operation", process.Arguments);
         Assert.DoesNotContain("submit-turn", process.Arguments);
         var published = Assert.Single(api.PublishedEvents);
@@ -247,6 +254,45 @@ public sealed class CliRunnerCommandHandlerTests
         Assert.False(environment.ContainsKey("OPENCODE_CONFIG"));
         Assert.False(environment.ContainsKey("OPENCODE_CONFIG_DIR"));
         Assert.False(environment.ContainsKey("OPENCODE_CONFIG_CONTENT"));
+    }
+
+    [Fact]
+    public async Task StartInvocationAsync_WhenAdapterReturnsInvalidEnvelope_ThenFailsBeforePublishingSuccess()
+    {
+        var api = new FakeRunnerApiClient(
+            """{"id":"turn_1","agent_session_id":"session_1","instruction":"hello"}""");
+        var process = new FakeAdapterProcessRunner(
+            new ProcessOutput(
+                "uv run lamplighter-opencode adapter-operation",
+                0,
+                """
+                {
+                  "message_type": "adapter.operation_result",
+                  "protocol_version": "1.0",
+                  "schema_version": "1.0",
+                  "result_id": "result_cmd_1",
+                  "operation_id": "cmd_1",
+                  "status": "completed",
+                  "completed_at": "1970-01-01T00:00:00Z",
+                  "fencing_token": 1,
+                  "correlation": {
+                    "command_id": "cmd_1"
+                  }
+                }
+                """,
+                ""));
+        var handler = CreateHandler(api, process, NewRuntimeRoot());
+        var command = Command(
+            ControllerCommandTypes.StartInvocation,
+            Content("turn_1", "application/json", 2),
+            runtimeId: "agent_1",
+            sessionId: "session_1",
+            invocationId: "turn_1");
+
+        var result = await handler.HandleAsync(command, CancellationToken.None);
+
+        Assert.Equal(CommandDeliveryStatuses.Failed, result.DeliveryStatus);
+        Assert.Contains("result_ref", api.UploadedContent.Single(), StringComparison.Ordinal);
     }
 
     private static CliRunnerCommandHandler CreateHandler(
@@ -434,6 +480,8 @@ public sealed class CliRunnerCommandHandlerTests
 
         public List<ContentReference> Uploads { get; } = [];
 
+        public List<string> UploadedContent { get; } = [];
+
         public Task UpsertHeartbeatAsync(
             ControllerHeartbeat heartbeat,
             CancellationToken cancellationToken) => Task.CompletedTask;
@@ -470,6 +518,7 @@ public sealed class CliRunnerCommandHandlerTests
                 contentType,
                 content.Length);
             Uploads.Add(contentRef);
+            UploadedContent.Add(content);
             return Task.FromResult(contentRef);
         }
 
@@ -483,6 +532,7 @@ public sealed class CliRunnerCommandHandlerTests
                 contentType,
                 bytes.Length);
             Uploads.Add(contentRef);
+            UploadedContent.Add(System.Text.Encoding.UTF8.GetString(bytes));
             return Task.FromResult(contentRef);
         }
 
