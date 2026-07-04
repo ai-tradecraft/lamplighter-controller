@@ -24,6 +24,8 @@ builder.Services.AddSingleton<IAgentRuntimeAdapter, CliAgentRuntimeAdapter>();
 builder.Services.AddSingleton<IAdapterRuntimeObserver, CliAdapterRuntimeObserver>();
 builder.Services.AddSingleton<IRunnerCommandHandler, CliRunnerCommandHandler>();
 builder.Services.AddSingleton<RunnerCommandLoop>();
+builder.Services.AddSingleton<RuntimeAdapterEventForwarder>();
+builder.Services.AddSingleton<RuntimeAdapterEventLoop>();
 builder.Services.AddHostedService<RunnerWorker>();
 
 await builder.Build().RunAsync();

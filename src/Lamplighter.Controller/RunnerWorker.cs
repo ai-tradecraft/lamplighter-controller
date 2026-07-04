@@ -12,6 +12,7 @@ internal sealed class RunnerWorker(
     IRunnerApiClient apiClient,
     IAdapterRuntimeObserver runtimeObserver,
     RunnerCommandLoop commandLoop,
+    RuntimeAdapterEventLoop eventLoop,
     ILogger<RunnerWorker> logger) : BackgroundService
 {
     private readonly RunnerOptions _options = options.Value;
@@ -26,7 +27,8 @@ internal sealed class RunnerWorker(
 
         var heartbeatTask = RunHeartbeatLoopAsync(stoppingToken);
         var commandTask = commandLoop.RunAsync(stoppingToken);
-        await Task.WhenAll(heartbeatTask, commandTask);
+        var eventTask = eventLoop.RunAsync(stoppingToken);
+        await Task.WhenAll(heartbeatTask, commandTask, eventTask);
     }
 
     private async Task RunHeartbeatLoopAsync(CancellationToken stoppingToken)

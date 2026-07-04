@@ -32,6 +32,11 @@ CLI transport from this controller.
 - Runtime heartbeat inventory is requested through the same adapter operation
   path using `InspectRuntime`. The controller no longer parses OpenCode runtime
   files or probes OpenCode health endpoints directly.
+- Runtime adapter events are consumed through the same provider-neutral
+  operation path using `ReadEvents`. The controller event-forwarding loop maps
+  adapter events to northbound controller events, preserves the source adapter
+  event in event extensions, and advances its local replay cursor only after
+  publishing a page.
 - OpenCode adapter payload schemas live in
   `../tradecraft-contracts/contracts/lamplighter-opencode/schemas`.
 - The controller does not own provider/model configuration. It passes work to
