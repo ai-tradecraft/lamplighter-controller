@@ -20,6 +20,10 @@ internal interface IAgentRuntimeAdapter
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken);
 
+    Task<AgentRuntimeAdapterResult> PublishDocumentAsync(
+        AgentRuntimeAdapterRequest request,
+        CancellationToken cancellationToken);
+
     Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken);
@@ -125,6 +129,15 @@ internal sealed class CliAgentRuntimeAdapter(
         var output = await SendOperationAsync("ReadEvents", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.adapter-event-batch+json");
+    }
+
+    public async Task<AgentRuntimeAdapterResult> PublishDocumentAsync(
+        AgentRuntimeAdapterRequest request,
+        CancellationToken cancellationToken)
+    {
+        var output = await SendOperationAsync("PublishDocument", request, cancellationToken)
+            .ConfigureAwait(false);
+        return Complete(output, "application/vnd.tradecraft.document-publication-result+json");
     }
 
     public async Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
@@ -491,7 +504,8 @@ internal static class RuntimeAdapterEnvelopeValidator
         "CreateSnapshot",
         "RestoreSnapshot",
         "CollectArtifacts",
-        "CollectDiagnostics"
+        "CollectDiagnostics",
+        "PublishDocument"
     };
 
     public static void ValidateOperation(JsonObject operation)

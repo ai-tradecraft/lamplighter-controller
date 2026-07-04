@@ -104,6 +104,10 @@ public sealed class AdapterRuntimeObserverTests
             AgentRuntimeAdapterRequest request,
             CancellationToken cancellationToken) => throw new NotSupportedException();
 
+        public Task<AgentRuntimeAdapterResult> PublishDocumentAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
             AgentRuntimeAdapterRequest request,
             CancellationToken cancellationToken) => throw new NotSupportedException();

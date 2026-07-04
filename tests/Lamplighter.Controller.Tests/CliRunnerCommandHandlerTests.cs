@@ -218,6 +218,41 @@ public sealed class CliRunnerCommandHandlerTests
     }
 
     [Fact]
+    public async Task PublishDocumentAsync_WhenCalled_ThenSendsPublishDocumentAdapterOperation()
+    {
+        // Arrange
+        var process = new FakeAdapterProcessRunner(
+            new ProcessOutput(
+                "uv run lamplighter-opencode adapter-operation",
+                0,
+                AdapterResult(DocumentPublicationResultJson(), "application/vnd.tradecraft.document-publication-result+json"),
+                ""));
+        var controllerWorkspace = NewRuntimeRoot();
+        var options = Options.Create(new RunnerOptions
+        {
+            RunnerId = "controller_1",
+            ControllerWorkspace = controllerWorkspace,
+            Adapter = OpenCodeCliAdapterOptions()
+        });
+        var adapter = new CliAgentRuntimeAdapter(new CliAdapterTransport(process, options), options);
+
+        // Act
+        var result = await adapter.PublishDocumentAsync(
+            PublishDocumentRequest(),
+            CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.Equal("application/vnd.tradecraft.document-publication-result+json", result.ContentType);
+        var operation = ReadOperation(process);
+        Assert.Equal("PublishDocument", operation.RootElement.GetProperty("operation_type").GetString());
+        var payload = operation.RootElement.GetProperty("payload");
+        Assert.Equal("document_publication_request", payload.GetProperty("document_type").GetString());
+        Assert.Equal("publication_91", payload.GetProperty("publication_id").GetString());
+        Assert.Equal("docs/architecture.md", payload.GetProperty("source").GetProperty("workspace_path").GetString());
+    }
+
+    [Fact]
     public async Task HandleAsync_WhenInvocationReturnsStructuredFailure_ThenDeliveryStillCompletes()
     {
         // Arrange
@@ -438,6 +473,44 @@ public sealed class CliRunnerCommandHandlerTests
             PayloadContentType: "application/vnd.tradecraft.adapter-event-replay-request+json");
     }
 
+    private static AgentRuntimeAdapterRequest PublishDocumentRequest()
+    {
+        var publicationRequest = JsonSerializer.Serialize(
+            new DocumentPublicationRequest(
+                DocumentType: "document_publication_request",
+                PublicationId: "publication_91",
+                Source: new DocumentPublicationSource(WorkspacePath: "docs/architecture.md"),
+                LogicalPath: "design/architecture.md",
+                Title: "Runtime Architecture",
+                MediaType: "text/markdown",
+                VersionIntent: "minor",
+                IdempotencyKey: "turn_one:publish:architecture",
+                Target: new ResourceTarget(
+                    ControllerId: "controller_1",
+                    RuntimeId: "agent_1",
+                    AgentSessionId: "session_1",
+                    InvocationId: "turn_one"),
+                Correlation: new ProtocolCorrelation(CommandId: "cmd_publish_document", InvocationId: "turn_one")),
+            ControllerProtocolJson.Options);
+        return new AgentRuntimeAdapterRequest(
+            CommandId: "cmd_publish_document",
+            Target: new ResourceTarget(
+                ControllerId: "controller_1",
+                RuntimeId: "agent_1",
+                AgentSessionId: "session_1",
+                InvocationId: "turn_one"),
+            IdempotencyKey: "publish_document_1",
+            Deadline: DateTimeOffset.UnixEpoch.AddHours(1),
+            FencingToken: 1,
+            Correlation: new ProtocolCorrelation(CommandId: "cmd_publish_document", InvocationId: "turn_one"),
+            AuthorizationContext: new AuthorizationContext(
+                "system://tests",
+                "authorization-grant://tests/1",
+                DateTimeOffset.UnixEpoch),
+            Payload: publicationRequest,
+            PayloadContentType: "application/vnd.tradecraft.document-publication-request+json");
+    }
+
     private static string AdapterEventBatchJson()
     {
         return """
@@ -451,6 +524,26 @@ public sealed class CliRunnerCommandHandlerTests
               "events": [],
               "exhausted": true,
               "generated_at": "2026-07-02T00:00:00Z"
+            }
+            """;
+    }
+
+    private static string DocumentPublicationResultJson()
+    {
+        return """
+            {
+              "document_type": "document_publication_result",
+              "publication_id": "publication_91",
+              "document_ref": "document://local/design/architecture.md",
+              "version_ref": "document-version://local/publication_91",
+              "content_ref": {
+                "uri": "file:///tmp/architecture.md",
+                "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+                "content_type": "text/markdown",
+                "length": 12480
+              },
+              "created": false,
+              "published_at": "2026-07-02T00:00:00Z"
             }
             """;
     }
