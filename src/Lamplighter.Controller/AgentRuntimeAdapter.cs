@@ -16,6 +16,10 @@ internal interface IAgentRuntimeAdapter
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken);
 
+    Task<AgentRuntimeAdapterResult> ReadEventsAsync(
+        AgentRuntimeAdapterRequest request,
+        CancellationToken cancellationToken);
+
     Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
         AgentRuntimeAdapterRequest request,
         CancellationToken cancellationToken);
@@ -112,6 +116,15 @@ internal sealed class CliAgentRuntimeAdapter(
         var output = await SendOperationAsync("InspectRuntime", request, cancellationToken)
             .ConfigureAwait(false);
         return Complete(output, "application/vnd.tradecraft.runtime-inventory+json");
+    }
+
+    public async Task<AgentRuntimeAdapterResult> ReadEventsAsync(
+        AgentRuntimeAdapterRequest request,
+        CancellationToken cancellationToken)
+    {
+        var output = await SendOperationAsync("ReadEvents", request, cancellationToken)
+            .ConfigureAwait(false);
+        return Complete(output, "application/vnd.tradecraft.adapter-event-batch+json");
     }
 
     public async Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
@@ -455,6 +468,7 @@ internal static class RuntimeAdapterEnvelopeValidator
         "PrepareRuntime",
         "StartRuntime",
         "InspectRuntime",
+        "ReadEvents",
         "StopRuntime",
         "TerminateRuntime",
         "ReconcileRuntime",

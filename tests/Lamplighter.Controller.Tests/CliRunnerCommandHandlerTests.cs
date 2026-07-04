@@ -180,6 +180,44 @@ public sealed class CliRunnerCommandHandlerTests
     }
 
     [Fact]
+    public async Task ReadEventsAsync_WhenCalled_ThenSendsReadEventsAdapterOperation()
+    {
+        // Arrange
+        var process = new FakeAdapterProcessRunner(
+            new ProcessOutput(
+                "uv run lamplighter-opencode adapter-operation",
+                0,
+                AdapterResult(AdapterEventBatchJson(), "application/vnd.tradecraft.adapter-event-batch+json"),
+                ""));
+        var controllerWorkspace = NewRuntimeRoot();
+        var options = Options.Create(new RunnerOptions
+        {
+            RunnerId = "controller_1",
+            ControllerWorkspace = controllerWorkspace,
+            Adapter = OpenCodeCliAdapterOptions()
+        });
+        var adapter = new CliAgentRuntimeAdapter(new CliAdapterTransport(process, options), options);
+
+        // Act
+        var result = await adapter.ReadEventsAsync(
+            ReadEventsRequest(),
+            CancellationToken.None);
+
+        // Assert
+        Assert.True(result.Succeeded);
+        Assert.Equal("application/vnd.tradecraft.adapter-event-batch+json", result.ContentType);
+        var operation = ReadOperation(process);
+        Assert.Equal("ReadEvents", operation.RootElement.GetProperty("operation_type").GetString());
+        Assert.Equal(
+            controllerWorkspace,
+            operation.RootElement.GetProperty("extensions").GetProperty("tradecraft.dev/controller_workspace").GetString());
+        var payload = operation.RootElement.GetProperty("payload");
+        Assert.Equal("adapter_event_replay_request", payload.GetProperty("document_type").GetString());
+        Assert.Equal(2, payload.GetProperty("from_sequence").GetInt64());
+        Assert.Equal(50, payload.GetProperty("max_events").GetInt32());
+    }
+
+    [Fact]
     public async Task HandleAsync_WhenInvocationReturnsStructuredFailure_ThenDeliveryStillCompletes()
     {
         // Arrange
@@ -375,6 +413,46 @@ public sealed class CliRunnerCommandHandlerTests
         Assert.True(operationIndex >= 0);
         var operationPath = process.Arguments[operationIndex + 1];
         return JsonDocument.Parse(File.ReadAllText(operationPath));
+    }
+
+    private static AgentRuntimeAdapterRequest ReadEventsRequest()
+    {
+        var replayRequest = JsonSerializer.Serialize(
+            new AdapterEventReplayRequest(
+                DocumentType: "adapter_event_replay_request",
+                FromSequence: 2,
+                MaxEvents: 50),
+            ControllerProtocolJson.Options);
+        return new AgentRuntimeAdapterRequest(
+            CommandId: "cmd_read_events",
+            Target: new ResourceTarget(ControllerId: "controller_1"),
+            IdempotencyKey: "read_events_2",
+            Deadline: DateTimeOffset.UnixEpoch.AddHours(1),
+            FencingToken: 1,
+            Correlation: new ProtocolCorrelation(CommandId: "cmd_read_events"),
+            AuthorizationContext: new AuthorizationContext(
+                "system://tests",
+                "authorization-grant://tests/1",
+                DateTimeOffset.UnixEpoch),
+            Payload: replayRequest,
+            PayloadContentType: "application/vnd.tradecraft.adapter-event-replay-request+json");
+    }
+
+    private static string AdapterEventBatchJson()
+    {
+        return """
+            {
+              "document_type": "adapter_event_batch",
+              "adapter_kind": "opencode",
+              "adapter_version": "0.1.0",
+              "from_sequence": 2,
+              "through_sequence": 2,
+              "next_sequence": 3,
+              "events": [],
+              "exhausted": true,
+              "generated_at": "2026-07-02T00:00:00Z"
+            }
+            """;
     }
 
     private static string AdapterResult(

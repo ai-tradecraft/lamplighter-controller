@@ -100,6 +100,10 @@ public sealed class AdapterRuntimeObserverTests
             return Task.FromResult(result);
         }
 
+        public Task<AgentRuntimeAdapterResult> ReadEventsAsync(
+            AgentRuntimeAdapterRequest request,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
         public Task<AgentRuntimeAdapterResult> StartRuntimeAsync(
             AgentRuntimeAdapterRequest request,
             CancellationToken cancellationToken) => throw new NotSupportedException();
